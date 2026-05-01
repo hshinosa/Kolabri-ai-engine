@@ -23,7 +23,60 @@ sys.modules['pptx'] = MagicMock()
 sys.modules['openpyxl'] = MagicMock()
 sys.modules['pandas'] = MagicMock()
 sys.modules['numpy'] = MagicMock()
-sys.modules['PIL'] = MagicMock()
+_pil_mock = MagicMock()
+
+class _FakeImage:
+    def __init__(self, mode="RGB", size=(100, 100)):
+        self.mode = mode
+        self.size = size
+        self.width = size[0]
+        self.height = size[1]
+    def convert(self, mode):
+        return _FakeImage(mode, self.size)
+    def thumbnail(self, size, *args, **kwargs):
+        self.size = size
+        self.width = size[0]
+        self.height = size[1]
+    def resize(self, size, *args, **kwargs):
+        return _FakeImage(self.mode, size)
+    def close(self):
+        pass
+    def tobytes(self):
+        return b'\x00' * (self.width * self.height * 3)
+    def save(self, fp=None, *args, **kwargs):
+        if fp and hasattr(fp, 'write'):
+            fp.write(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+
+class _FakeResampling:
+    LANCZOS = 1
+    BICUBIC = 3
+
+class _FakeImageModule:
+    Image = _FakeImage
+    Resampling = _FakeResampling
+    LANCZOS = 1
+    BICUBIC = 3
+    new = staticmethod(lambda mode, size, *a, **kw: _FakeImage(mode, size))
+    frombytes = staticmethod(lambda mode, size, data, *a, **kw: _FakeImage(mode, size))
+    @staticmethod
+    def open(fp, *a, **kw):
+        PNG_MAGIC = b'\x89PNG'
+        JPEG_MAGIC = b'\xff\xd8\xff'
+        if isinstance(fp, bytes):
+            data = fp
+        elif hasattr(fp, 'read'):
+            data = fp.read(16)
+            if hasattr(fp, 'seek'):
+                fp.seek(0)
+        else:
+            data = b''
+        if not (data[:4] == PNG_MAGIC or data[:3] == JPEG_MAGIC):
+            raise Exception("cannot identify image file")
+        return _FakeImage("RGB", (200, 200))
+
+_pil_mock.Image = _FakeImageModule
+sys.modules['PIL'] = _pil_mock
+sys.modules['PIL.Image'] = _FakeImageModule
 sys.modules['motor'] = MagicMock()
 sys.modules['motor.motor_asyncio'] = MagicMock()
 sys.modules['redis.asyncio'] = MagicMock()
