@@ -41,7 +41,6 @@ from app.core.cache_analyzer import get_cache_analyzer
 
 # [PRIORITY 3] Batching & Circuit Breaker
 from app.services.batch_llm import get_batch_llm_service
-from app.core.circuit_breaker import get_circuit_breaker
 from app.services.circuit_breaker import get_llm_circuit_breaker
 from app.services.monitoring import get_monitor
 from app.services.reranker import get_reranker
