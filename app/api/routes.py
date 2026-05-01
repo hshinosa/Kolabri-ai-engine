@@ -31,12 +31,12 @@ from app.core.prompt_styles import PERSONAL_CHAT_STYLE
 from app.services.document_processor import get_document_processor
 
 # [PRIORITY 1] Optimized services dengan connection pooling & caching
-from app.services.llm_optimized import get_llm_service
-from app.services.rag_optimized import get_optimized_rag_pipeline as get_rag_pipeline
+from app.services.llm import get_llm_service
+from app.services.rag import get_rag_pipeline
 
 # [PRIORITY 2] Vector store caching & MongoDB pooling
-from app.services.vector_store_optimized import get_optimized_vector_store as get_vector_store
-from app.services.mongodb_logger_optimized import get_optimized_mongodb_logger as get_mongo_logger
+from app.services.vector_store import get_vector_store
+from app.services.mongodb_logger import get_mongo_logger
 from app.core.cache_analyzer import get_cache_analyzer
 
 # [PRIORITY 3] Batching & Circuit Breaker
@@ -614,8 +614,7 @@ async def health_check():
 
     # Check vector store
     try:
-        vector_store = await get_vector_store()
-        # Simple check - try to list collections
+        vector_store = get_vector_store()
         await vector_store._ensure_collection("health_check")
         services["vector_store"] = True
     except Exception as e:

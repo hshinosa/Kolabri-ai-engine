@@ -24,8 +24,8 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis_cache import get_redis_cache, CACHE_TTL
-from app.services.llm_optimized import get_llm_service
-from app.services.rag_optimized import get_optimized_rag_pipeline
+from app.services.llm import get_llm_service
+from app.services.rag import get_rag_pipeline
 
 logger = get_logger(__name__)
 
@@ -215,7 +215,7 @@ async def _process_single_ask(request: BatchAskRequest) -> BatchAskResponse:
                 )
         
         # Process dengan RAG pipeline
-        rag_pipeline = get_optimized_rag_pipeline()
+        rag_pipeline = get_rag_pipeline()
         
         result = await rag_pipeline.query(
             query=request.query,

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
@@ -6,13 +7,17 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.prompt_styles import GROUP_DISCUSSION_STYLE, GROUP_INTERVENTION_STYLE, SUMMARY_STYLE
+import httpx
 
 logger = get_logger(__name__)
 
-# Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY_BASE = 1.0
 RETRY_DELAY_MULTIPLIER = 2.0
+MAX_CONNECTIONS = 20
+MAX_KEEPALIVE = 10
+TIMEOUT_CONNECT = 5.0
+TIMEOUT_READ = 60.0
 
 @dataclass
 class ChatMessage:
@@ -26,6 +31,7 @@ class LLMResponse:
     model: str
     success: bool
     error: Optional[str] = None
+    response_time_ms: float = 0.0
 
 class OpenAILLMService:
     SYSTEM_PROMPTS = {
@@ -38,12 +44,31 @@ class OpenAILLMService:
     def __init__(self):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required")
+        self._http_client = httpx.AsyncClient(
+            limits=httpx.Limits(
+                max_connections=MAX_CONNECTIONS,
+                max_keepalive_connections=MAX_KEEPALIVE,
+            ),
+            timeout=httpx.Timeout(
+                connect=TIMEOUT_CONNECT,
+                read=TIMEOUT_READ,
+                write=10.0,
+                pool=5.0
+            ),
+            http2=True,
+        )
         self.client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_BASE_URL,
+            http_client=self._http_client,
+            max_retries=MAX_RETRIES,
         )
         self.model = settings.OPENAI_MODEL
         self.temperature = settings.OPENAI_TEMPERATURE
         self.max_tokens = settings.OPENAI_MAX_TOKENS
+
+    async def close(self):
+        await self._http_client.aclose()
 
     async def generate(
         self,
@@ -53,7 +78,6 @@ class OpenAILLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> LLMResponse:
-        """Core generation method with retry logic."""
         full_system = system_prompt or self.SYSTEM_PROMPTS["default"]
         if context:
             full_system += f"\n\nKonteks tambahan:\n{context}"
@@ -63,14 +87,19 @@ class OpenAILLMService:
             {"role": "user", "content": prompt},
         ]
 
+        start = time.time()
         try:
-            return await self._execute_with_retry(
+            result = await self._execute_with_retry(
                 messages, temperature or self.temperature, max_tokens or self.max_tokens
             )
+            result.response_time_ms = (time.time() - start) * 1000
+            return result
         except Exception as e:
-            logger.error("llm_generation_failed", error=str(e))
+            elapsed = (time.time() - start) * 1000
+            logger.error("llm_generation_failed", error=str(e), response_time_ms=round(elapsed, 2))
             return LLMResponse(
-                content="", tokens_used=0, model=self.model, success=False, error=str(e)
+                content="", tokens_used=0, model=self.model, success=False,
+                error=str(e), response_time_ms=elapsed
             )
 
     @retry(
@@ -201,8 +230,18 @@ class OpenAILLMService:
             ]
         )
 
+OptimizedLLMService = OpenAILLMService
+
 _llm_service = None
+
 def get_llm_service():
     global _llm_service
-    if _llm_service is None: _llm_service = OpenAILLMService()
+    if _llm_service is None:
+        _llm_service = OpenAILLMService()
     return _llm_service
+
+async def close_llm_service():
+    global _llm_service
+    if _llm_service:
+        await _llm_service.close()
+        _llm_service = None
