@@ -800,3 +800,674 @@ def test_analyze_engagement_failure(mock_get_analyzer):
     assert data['success'] is False
     assert data['engagement_type'] == 'unknown'
     assert data['error'] == 'nlp failed'
+
+
+@patch('app.api.routes.get_rag_pipeline')
+def test_ask_question_success_with_sources_without_page(mock_rag):
+    mock_pipeline = MagicMock()
+    mock_result = MagicMock(
+        success=True,
+        answer='Jawaban lengkap',
+        sources=[{'source': 'Modul AI'}],
+    )
+    mock_pipeline.query = AsyncMock(return_value=mock_result)
+    mock_rag.return_value = mock_pipeline
+
+    response = client.post('/ask', json={'query': 'jelaskan ai', 'course_id': 'if101'})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is True
+    assert '1. Modul AI' in data['answer']
+    assert '(hal.' not in data['answer']
+
+
+@patch('app.api.routes.get_llm_service')
+def test_personal_chat_stream_includes_history_messages(mock_get_llm):
+    mock_llm = MagicMock()
+    mock_llm.model = 'gpt-test'
+    mock_llm.client.chat.completions.create = AsyncMock(
+        return_value=make_stream(['Hai'])
+    )
+    mock_get_llm.return_value = mock_llm
+
+    payload = {
+        'message': 'Lanjut',
+        'history': [
+            {'role': 'user', 'content': 'Halo'},
+            {'role': 'assistant', 'content': 'Hai juga'},
+        ],
+    }
+    response = client.post('/chat/personal/stream', json=payload)
+
+    assert response.status_code == 200
+    called_messages = mock_llm.client.chat.completions.create.await_args.kwargs['messages']
+    assert called_messages[1] == {'role': 'user', 'content': 'Halo'}
+    assert called_messages[2] == {'role': 'assistant', 'content': 'Hai juga'}
+    assert 'data: {"content": "Hai"}' in response.text
+
+
+def test_ingest_document_requires_filename():
+    import asyncio
+    from io import BytesIO
+
+    from fastapi import BackgroundTasks, HTTPException
+    from starlette.datastructures import UploadFile
+
+    from app.api.routes import ingest_document
+
+    upload = UploadFile(file=BytesIO(b'abc'), filename='')
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            ingest_document(
+                background_tasks=BackgroundTasks(),
+                file=upload,
+                course_id='if101',
+                file_id='file-no-name',
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == 'Filename is required'
+
+
+def test_ingest_document_returns_500_when_temp_write_fails():
+    class BrokenWriter:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def write(self, chunk):
+            raise RuntimeError('disk write failed')
+
+        def close(self):
+            return None
+
+    with patch('app.api.routes.tempfile.mkstemp', return_value=(123, '/tmp/fake-upload.txt')):
+        with patch('app.api.routes.os.fdopen', return_value=BrokenWriter()):
+            with patch('app.api.routes.os.unlink') as mock_unlink:
+                response = client.post(
+                    '/ingest',
+                    data={'course_id': 'if101', 'file_id': 'file-write-error'},
+                    files={'file': ('materi.txt', b'abc', 'text/plain')},
+                )
+
+    assert response.status_code == 500
+    assert 'Failed to save uploaded file: disk write failed' == response.json()['detail']
+    mock_unlink.assert_called_once_with('/tmp/fake-upload.txt')
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_ingest_background_success(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_ingest_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.write(b'fake pdf')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            file_type='pdf',
+            chunks=['c1', 'c2'],
+            page_count=2,
+            image_count=0,
+            error=None,
+        )
+    )
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(
+        _process_ingest_background(
+            tmp.name,
+            'materi.pdf',
+            'if101',
+            'file-123',
+        )
+    )
+
+    kwargs = mock_processor.process_file.await_args.kwargs
+    assert kwargs['collection_name'] == 'course_if101'
+    assert kwargs['document_id'] == 'file-123'
+    assert kwargs['metadata']['original_filename'] == 'materi.pdf'
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_ingest_background_logs_failed_result_and_cleans_up(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_ingest_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.txt')
+    tmp.write(b'hello')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(
+        return_value=SimpleNamespace(
+            success=False,
+            file_type='txt',
+            chunks=[],
+            page_count=0,
+            image_count=0,
+            error='parse failed',
+        )
+    )
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(_process_ingest_background(tmp.name, 'materi.txt', 'if101', 'file-err'))
+
+    assert mock_processor.process_file.await_count == 1
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_ingest_background_handles_exception_and_cleans_up(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_ingest_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.docx')
+    tmp.write(b'docx')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(side_effect=Exception('processor crashed'))
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(_process_ingest_background(tmp.name, 'materi.docx', 'if101', 'file-boom'))
+
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes._process_batch_file_background', new_callable=AsyncMock)
+def test_ingest_batch_skips_entries_without_filename(mock_background_task):
+    import asyncio
+    from io import BytesIO
+
+    from fastapi import BackgroundTasks
+    from starlette.datastructures import UploadFile
+
+    from app.api.routes import ingest_batch
+
+    background_tasks = BackgroundTasks()
+    result = asyncio.run(
+        ingest_batch(
+            background_tasks=background_tasks,
+            files=[
+                UploadFile(file=BytesIO(b''), filename=''),
+                UploadFile(file=BytesIO(b'alpha'), filename='valid.txt'),
+            ],
+            course_id='if101',
+            extract_images=False,
+            perform_ocr=False,
+        )
+    )
+
+    data = result.model_dump()
+    assert data['total_files'] == 1
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].func is mock_background_task
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_batch_file_background_success(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_batch_file_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    tmp.write(b'fake pdf')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            chunks=['c1'],
+            error=None,
+        )
+    )
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(
+        _process_batch_file_background(
+            tmp.name,
+            'batch.pdf',
+            'if101',
+            'doc-1',
+            3,
+            True,
+            False,
+        )
+    )
+
+    kwargs = mock_processor.process_file.await_args.kwargs
+    assert kwargs['collection_name'] == 'course_if101'
+    assert kwargs['metadata']['batch_index'] == 3
+    assert kwargs['metadata']['extract_images'] is True
+    assert kwargs['metadata']['perform_ocr'] is False
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_batch_file_background_handles_failed_result(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_batch_file_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.md')
+    tmp.write(b'# test')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(
+        return_value=SimpleNamespace(success=False, chunks=[], error='batch parse failed')
+    )
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(
+        _process_batch_file_background(
+            tmp.name,
+            'batch.md',
+            'if101',
+            'doc-2',
+            1,
+            False,
+            True,
+        )
+    )
+
+    assert mock_processor.process_file.await_count == 1
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes.get_document_processor')
+def test_process_batch_file_background_handles_exception(mock_get_processor):
+    import asyncio
+    import os
+    import tempfile
+
+    from app.api.routes import _process_batch_file_background
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.txt')
+    tmp.write(b'text')
+    tmp.close()
+
+    mock_processor = MagicMock()
+    mock_processor.process_file = AsyncMock(side_effect=Exception('batch exploded'))
+    mock_get_processor.return_value = mock_processor
+
+    asyncio.run(
+        _process_batch_file_background(
+            tmp.name,
+            'batch.txt',
+            'if101',
+            'doc-3',
+            0,
+            False,
+            False,
+        )
+    )
+
+    assert not os.path.exists(tmp.name)
+
+
+@patch('app.api.routes.get_vector_store')
+@patch('app.services.llm.get_llm_service', side_effect=Exception('llm unavailable'))
+def test_health_check_degraded_when_llm_check_fails(mock_get_llm, mock_get_vector_store):
+    mock_store = MagicMock()
+    mock_store._ensure_collection = AsyncMock(return_value=None)
+    mock_get_vector_store.return_value = mock_store
+
+    response = client.get('/health')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['status'] == 'degraded'
+    assert data['services']['vector_store'] is True
+    assert data['services']['llm'] is False
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_group_dashboard_failure_returns_500(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_group_dashboard_data = AsyncMock(side_effect=Exception('dashboard failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.get('/analytics/dashboard/group/group-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'dashboard failed'
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_individual_dashboard_failure_returns_500(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_individual_dashboard_data = AsyncMock(side_effect=Exception('individual failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.get('/analytics/dashboard/individual/user-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'individual failed'
+
+
+def test_validate_course_id_rejects_invalid_characters():
+    from fastapi import HTTPException
+
+    from app.api.routes import validate_course_id
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_course_id('course/../etc')
+
+    assert exc_info.value.status_code == 400
+    assert 'Invalid course ID format' in exc_info.value.detail
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_check_group_status_failure(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.check_group_status = AsyncMock(side_effect=Exception('status down'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.get('/groups/group-1/status', params={'topic': 'AI'})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to check group status: status down'
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_track_participation_failure(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.track_participation = AsyncMock(side_effect=Exception('tracking failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.post('/groups/group-1/track-participation', data={'user_id': 'user-1'})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to track participation: tracking failed'
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_update_last_message_time_failure(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.update_last_message_time = AsyncMock(side_effect=Exception('timestamp failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.post('/groups/group-1/update-last-message')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to update last message time: timestamp failed'
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_set_group_topic_failure(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.set_group_topic = AsyncMock(side_effect=Exception('topic failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.post('/groups/group-1/set-topic', data={'topic': 'AI ethics'})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to set group topic: topic failed'
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', True)
+@patch('app.api.routes.get_efficiency_guard')
+def test_get_cache_statistics_failure(mock_get_guard):
+    mock_guard = MagicMock()
+    mock_guard.get_cache_statistics.side_effect = Exception('cache stats failed')
+    mock_get_guard.return_value = mock_guard
+
+    response = client.get('/efficiency/cache/statistics')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get cache statistics: cache stats failed'
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', True)
+@patch('app.api.routes.get_efficiency_guard')
+def test_clear_cache_failure(mock_get_guard):
+    mock_guard = MagicMock()
+    mock_guard.clear_cache.side_effect = Exception('clear failed')
+    mock_get_guard.return_value = mock_guard
+
+    response = client.get('/efficiency/cache/clear')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to clear cache: clear failed'
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', False)
+def test_get_efficiency_statistics_disabled():
+    response = client.get('/efficiency/statistics')
+
+    assert response.status_code == 200
+    assert response.json()['enabled'] is False
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', True)
+@patch('app.api.routes.get_efficiency_guard')
+def test_get_efficiency_statistics_failure(mock_get_guard):
+    mock_guard = MagicMock()
+    mock_guard.get_statistics.side_effect = Exception('efficiency stats failed')
+    mock_get_guard.return_value = mock_guard
+
+    response = client.get('/efficiency/statistics')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get efficiency statistics: efficiency stats failed'
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', False)
+def test_get_rate_limit_info_disabled():
+    response = client.get('/efficiency/rate-limit/user-1')
+
+    assert response.status_code == 200
+    assert response.json()['enabled'] is False
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', True)
+@patch('app.api.routes.get_efficiency_guard')
+def test_get_rate_limit_info_failure(mock_get_guard):
+    mock_guard = MagicMock()
+    mock_guard.get_rate_limit_info.side_effect = Exception('rate limit failed')
+    mock_get_guard.return_value = mock_guard
+
+    response = client.get('/efficiency/rate-limit/user-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get rate limit info: rate limit failed'
+
+
+@patch('app.api.routes.get_monitor')
+def test_metrics_failure(mock_get_monitor):
+    mock_get_monitor.side_effect = Exception('metrics failed')
+
+    response = client.get('/metrics')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Metrics export failed: metrics failed'
+
+
+@patch('app.api.routes.get_monitor')
+def test_monitoring_status_failure(mock_get_monitor):
+    mock_get_monitor.side_effect = Exception('monitor failed')
+
+    response = client.get('/health/monitoring')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get monitoring status: monitor failed'
+
+
+@patch('app.api.routes.get_llm_circuit_breaker')
+def test_get_circuit_breaker_status_failure(mock_get_cb):
+    mock_get_cb.side_effect = Exception('breaker failed')
+
+    response = client.get('/health/circuit-breakers')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get circuit breaker status: breaker failed'
+
+
+@patch('app.api.routes.get_reranker')
+def test_get_reranker_status_failure(mock_get_reranker):
+    mock_get_reranker.side_effect = Exception('reranker failed')
+
+    response = client.get('/health/reranker')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get reranker status: reranker failed'
+
+
+@patch('app.api.routes.get_export_service')
+def test_export_group_activity_csv_failure(mock_get_export_service):
+    mock_service = MagicMock()
+    mock_service.export_group_activity_detailed = AsyncMock(side_effect=Exception('export group failed'))
+    mock_get_export_service.return_value = mock_service
+
+    response = client.get('/export/activity/group/group-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to export activity data: export group failed'
+
+
+@patch('app.api.routes.get_export_service')
+def test_export_chat_space_activity_csv_failure(mock_get_export_service):
+    mock_service = MagicMock()
+    mock_service.export_chat_space_activity = AsyncMock(side_effect=Exception('export chat failed'))
+    mock_get_export_service.return_value = mock_service
+
+    response = client.get('/export/activity/chat-space/chat-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to export activity data: export chat failed'
+
+
+@patch('app.services.mongodb_logger.get_mongo_logger')
+def test_export_process_mining_case_csv_failure(mock_get_mongo_logger):
+    mock_logger = MagicMock()
+    mock_logger.export_to_csv = AsyncMock(side_effect=Exception('case export failed'))
+    mock_get_mongo_logger.return_value = mock_logger
+
+    response = client.get('/export/process-mining/case/case-1')
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to export process mining data: case export failed'
+
+
+@patch('app.api.routes.get_intervention_service')
+def test_generate_summary_failure(mock_get_service):
+    mock_service = MagicMock()
+    mock_service.generate_summary = AsyncMock(side_effect=Exception('summary failed'))
+    mock_get_service.return_value = mock_service
+
+    payload = {
+        'messages': [{'sender': 'Alice', 'content': 'Pesan 1'}],
+        'chat_room_id': 'room-1',
+    }
+    response = client.post('/intervention/summary', json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is False
+    assert data['summary'] == ''
+    assert data['error'] == 'summary failed'
+
+
+@patch('app.api.routes.get_intervention_service')
+def test_generate_prompt_failure(mock_get_service):
+    mock_service = MagicMock()
+    mock_service.generate_discussion_prompt = AsyncMock(side_effect=Exception('prompt failed'))
+    mock_get_service.return_value = mock_service
+
+    response = client.post(
+        '/intervention/prompt',
+        json={'topic': 'AI ethics', 'context': 'kelas 1', 'difficulty': 'medium'},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is False
+    assert data['prompt'] == ''
+    assert data['error'] == 'prompt failed'
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', False)
+def test_get_high_frequency_queries_disabled():
+    response = client.get('/efficiency/high-frequency-queries', params={'limit': 3})
+
+    assert response.status_code == 200
+    assert response.json()['enabled'] is False
+
+
+@patch.object(__import__('app.api.routes', fromlist=['settings']).settings, 'ENABLE_EFFICIENCY_GUARD', True)
+@patch('app.api.routes.get_efficiency_guard')
+def test_get_high_frequency_queries_failure(mock_get_guard):
+    mock_guard = MagicMock()
+    mock_guard.get_high_frequency_queries.side_effect = Exception('hfq failed')
+    mock_get_guard.return_value = mock_guard
+
+    response = client.get('/efficiency/high-frequency-queries', params={'limit': 2})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'Failed to get high frequency queries: hfq failed'
+
+
+@patch('app.api.routes.get_orchestrator')
+def test_get_group_analytics_alias_failure(mock_get_orchestrator):
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_group_dashboard_data = AsyncMock(side_effect=Exception('alias failed'))
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.get('/analytics/group/group-1')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is False
+    assert data['group_id'] == 'group-1'
+    assert data['error'] == 'alias failed'
+
+
+@patch('app.api.routes.get_mongo_logger')
+def test_analytics_export_json_failure(mock_get_mongo_logger):
+    mock_logger = MagicMock()
+    mock_logger.export_to_csv = AsyncMock(side_effect=Exception('general export failed'))
+    mock_get_mongo_logger.return_value = mock_logger
+
+    response = client.get('/analytics/export')
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['success'] is False
+    assert data['error'] == 'general export failed'
+
+
+@patch('app.api.routes.get_vector_store')
+def test_delete_document_failure_with_collection_name(mock_get_vector_store):
+    mock_store = MagicMock()
+    mock_store.delete_documents = AsyncMock(side_effect=Exception('delete with collection failed'))
+    mock_get_vector_store.return_value = mock_store
+
+    response = client.delete('/documents/doc-2', params={'collection_name': 'course_if101'})
+
+    assert response.status_code == 500
+    assert response.json()['detail'] == 'delete with collection failed'
