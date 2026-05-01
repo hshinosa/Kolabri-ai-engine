@@ -10,12 +10,11 @@ Implements safety guardrails for AI responses:
 """
 
 import re
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
 from app.core.logging import get_logger
-from app.core.config import settings
 from app.services.injection_detector import InjectionDetector
 from app.services.toxicity_scorer import ToxicityScorer
 from app.services.pii_detector import PIIDetector

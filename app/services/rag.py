@@ -15,7 +15,7 @@ from app.core.guardrails import get_guardrails, GuardrailAction
 from app.core.config import settings
 from app.core.prompt_styles import GROUP_DISCUSSION_STYLE
 from app.services.vector_store import get_vector_store, VectorStoreService
-from app.services.llm import get_llm_service, OpenAILLMService, LLMResponse, ChatMessage
+from app.services.llm import get_llm_service, OpenAILLMService, ChatMessage
 from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
 
 logger = get_logger(__name__)

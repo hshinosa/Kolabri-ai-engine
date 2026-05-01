@@ -9,20 +9,19 @@ import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
-import statistics
 
 from app.core.logging import get_logger
 from app.core.config import settings
-from app.services.rag import RAGPipeline, get_rag_pipeline, RAGResult
-from app.services.nlp_analytics import EngagementAnalyzer, get_engagement_analyzer, EngagementAnalysis, EngagementType
-from app.services.intervention import ChatInterventionService, get_intervention_service, InterventionResult, InterventionType
-from app.services.mongodb_logger import MongoDBLogger, get_mongo_logger
-from app.services.goal_validator import GoalValidator, get_goal_validator
-from app.services.logic_listener import LogicListener, get_logic_listener
-from app.services.plan_vs_reality import PlanVsRealityAnalyzer, get_plan_vs_reality_analyzer
+from app.services.rag import get_rag_pipeline
+from app.services.nlp_analytics import get_engagement_analyzer, EngagementAnalysis, EngagementType
+from app.services.intervention import get_intervention_service
+from app.services.mongodb_logger import get_mongo_logger
+from app.services.goal_validator import get_goal_validator
+from app.services.logic_listener import get_logic_listener
+from app.services.plan_vs_reality import get_plan_vs_reality_analyzer
 from app.services.process_mining_anomaly import get_anomaly_detector
 from app.services.notification_service import get_notification_service
-from app.utils.logger import ProcessMiningLogger, get_process_mining_logger
+from app.utils.logger import get_process_mining_logger
 
 logger = get_logger(__name__)
 
