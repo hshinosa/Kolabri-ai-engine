@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # OpenAI Compatible API (GPT 5.2 - Best Performance)
     # ✅ SEC: No hardcoded secrets - must be loaded from environment
-    OPENAI_API_KEY: str  # Required, no default
+    OPENAI_API_KEY: str = ""  # Validated in production via model_validator
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"  # ✅ SEC: HTTPS default
     OPENAI_MODEL: str = "gpt-5.2"
     OPENAI_EMBEDDING_MODEL: str = "embedding-2"
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
 
     # Core-API Integration
     CORE_API_URL: str = "https://api.kolabri.com"  # SEC: HTTPS default
-    CORE_API_SECRET: str  # SEC: Required, no default
+    CORE_API_SECRET: str = ""  # Validated in production via model_validator
 
     # Logging
     LOG_LEVEL: str = "INFO"
