@@ -1,9 +1,11 @@
 from datetime import datetime
 import xml.etree.ElementTree as ET
+from unittest.mock import patch
 
 import pytest
 
-from app.services.xes_exporter import XESExporter
+from app.services import xes_exporter as xes_exporter_module
+from app.services.xes_exporter import XESExporter, get_xes_exporter
 
 
 def _local_name(tag):
@@ -170,3 +172,24 @@ def test_global_event_contains_default_lifecycle_transition(exporter):
     root = ET.fromstring(exporter.export([]))
     global_event = _children(root, "global")[1]
     assert _attr_values(global_event, "string", "lifecycle:transition") == ["complete"]
+
+
+def test_export_returns_raw_xml_when_pretty_print_fails(exporter):
+    events = [{"case_id": "case-1", "activity": "Study", "timestamp": datetime(2026, 1, 1, 9, 0), "resource": "alice"}]
+
+    with patch("app.services.xes_exporter.minidom.parseString", side_effect=Exception("invalid xml formatting")):
+        xml_output = exporter.export(events)
+
+    assert xml_output.startswith("<?xml")
+    root = ET.fromstring(xml_output)
+    assert _local_name(root.tag) == "log"
+
+
+def test_get_xes_exporter_returns_singleton_instance():
+    xes_exporter_module._xes_exporter = None
+
+    instance_one = get_xes_exporter()
+    instance_two = get_xes_exporter()
+
+    assert isinstance(instance_one, XESExporter)
+    assert instance_one is instance_two

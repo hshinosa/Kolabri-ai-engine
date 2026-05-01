@@ -1,6 +1,7 @@
 import pytest
 
-from app.services.srl_classifier import SRLClassifier, SRLPhase, SRLClassificationResult
+from app.services import srl_classifier as srl_classifier_module
+from app.services.srl_classifier import SRLClassifier, SRLPhase, SRLClassificationResult, get_srl_classifier
 
 
 @pytest.fixture
@@ -112,3 +113,13 @@ def test_uppercase_message_is_handled_case_insensitively(classifier):
     result = classifier.classify("TUJUAN KITA HARI INI ADALAH MEMAHAMI KONSEP AI")
     assert result.phase == SRLPhase.FORETHOUGHT
     assert result.sub_phase == "goal_setting"
+
+
+def test_get_srl_classifier_returns_singleton_instance():
+    srl_classifier_module._srl_classifier = None
+
+    instance_one = get_srl_classifier()
+    instance_two = get_srl_classifier()
+
+    assert isinstance(instance_one, SRLClassifier)
+    assert instance_one is instance_two

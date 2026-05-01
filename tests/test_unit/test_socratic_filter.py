@@ -1,6 +1,8 @@
 import random
 
-from app.services.socratic_filter import SocraticFilter, SocraticResult
+from app.services import socratic_filter as socratic_filter_module
+
+from app.services.socratic_filter import SocraticFilter, SocraticResult, get_socratic_filter
 
 
 def test_short_response_is_exempt():
@@ -136,3 +138,13 @@ def test_long_direct_answer_without_question_marks_gets_bonus_score():
     response = "Konsep ini adalah pendekatan sistematis untuk memahami hubungan antar komponen dalam arsitektur perangkat lunak. " * 3
     score = filter_service._is_direct_answer(response)
     assert score > 0.25
+
+
+def test_get_socratic_filter_returns_singleton_instance():
+    socratic_filter_module._socratic_filter = None
+
+    instance_one = get_socratic_filter()
+    instance_two = get_socratic_filter()
+
+    assert isinstance(instance_one, SocraticFilter)
+    assert instance_one is instance_two
