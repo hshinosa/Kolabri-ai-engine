@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION_PREFIX: str = "kolabri"
 
     # Embedding (Local FastEmbed)
-    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"
 
     # Document Processing
     MAX_FILE_SIZE_MB: int = 10
