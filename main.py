@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Kolabri AI-Engine", version="1.0.0", env=settings.ENV)
     
     # Ensure data directories exist
-    for d in [settings.CHROMA_PERSIST_DIR, "data/event_logs", "data/static/images"]:
+    for d in ["data/event_logs", "data/static/images"]:
         import os
         os.makedirs(d, exist_ok=True)
     

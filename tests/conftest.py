@@ -12,6 +12,10 @@ import sys
 from unittest.mock import MagicMock
 
 # Global Mocks for Heavy Modules
+sys.modules['qdrant_client'] = MagicMock()
+sys.modules['qdrant_client.models'] = MagicMock()
+sys.modules['qdrant_client.http'] = MagicMock()
+sys.modules['fastembed'] = MagicMock()
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
 sys.modules['chromadb.utils'] = MagicMock()

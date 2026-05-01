@@ -60,7 +60,7 @@ class TestSetupLogging:
         
         # Verify third-party loggers are set to WARNING
         assert logging.getLogger("uvicorn").level == logging.WARNING
-        assert logging.getLogger("chromadb").level == logging.WARNING
+        assert logging.getLogger("qdrant_client").level == logging.WARNING
         assert logging.getLogger("httpx").level == logging.WARNING
 
 

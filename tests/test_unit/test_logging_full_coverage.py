@@ -96,14 +96,14 @@ class TestSetupLogging:
             mock_settings.LOG_LEVEL = "INFO"
             
             uvicorn_logger = MagicMock()
-            chromadb_logger = MagicMock()
+            qdrant_client_logger = MagicMock()
             httpx_logger = MagicMock()
             root_logger = MagicMock()
             
             # Return appropriate logger based on name
             mock_get_logger.side_effect = lambda name=None, *args, **kwargs: {
                 'uvicorn': uvicorn_logger,
-                'chromadb': chromadb_logger,
+                'qdrant_client': qdrant_client_logger,
                 'httpx': httpx_logger,
             }.get(name, root_logger)
             
@@ -112,7 +112,7 @@ class TestSetupLogging:
             
             # Verify noise reduction
             uvicorn_logger.setLevel.assert_called_with(logging.WARNING)
-            chromadb_logger.setLevel.assert_called_with(logging.WARNING)
+            qdrant_client_logger.setLevel.assert_called_with(logging.WARNING)
             httpx_logger.setLevel.assert_called_with(logging.WARNING)
     
     def test_setup_logging_debug_level(self):

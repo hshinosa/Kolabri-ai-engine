@@ -1,439 +1,276 @@
-"""
-Tests for Vector Store Service - 100% Coverage
-"""
+"""Comprehensive tests for Qdrant-backed vector store service."""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
-from app.services.vector_store import (
-    VectorStoreService,
-    OpenAIEmbeddingFunction,
-    get_vector_store,
-)
+
+from app.services import vector_store
+from app.services.vector_store import VectorStoreService, get_vector_store
 
 
-class TestOpenAIEmbeddingFunction:
-    """Test OpenAIEmbeddingFunction class."""
-    
-    def test_call(self):
-        """Test __call__ method."""
-        with patch('app.services.vector_store.get_embedding_service') as mock_get:
-            mock_service = MagicMock()
-            mock_service.embed_texts = MagicMock(return_value=[[0.1, 0.2], [0.3, 0.4]])
-            mock_get.return_value = mock_service
-            
-            # Mock asyncio loop
-            with patch('asyncio.get_event_loop') as mock_loop:
-                mock_loop.return_value.run_until_complete = MagicMock(return_value=[[0.1, 0.2], [0.3, 0.4]])
-                
-                func = OpenAIEmbeddingFunction()
-                result = func(["text1", "text2"])
-                
-                assert result == [[0.1, 0.2], [0.3, 0.4]]
+def _point(content, payload=None, score=0.9):
+    return SimpleNamespace(payload={"content": content, **(payload or {})}, score=score)
 
 
 class TestVectorStoreService:
-    """Test VectorStoreService class."""
-    
     @pytest.fixture
-    def vector_store(self):
-        """Create vector store instance."""
-        return VectorStoreService()
-    
-    def test_init(self, vector_store):
-        """Test initialization."""
-        assert vector_store._client is None
-        assert vector_store._initialized is False
-        assert vector_store._collections == {}
-    
+    def vector_store_service(self):
+        svc = VectorStoreService()
+        svc._client = MagicMock()
+        svc._async_client = MagicMock()
+        svc._embedding_service = MagicMock()
+        svc._embedding_service.embed_texts = AsyncMock(return_value=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        svc._embedding_service.embed_query = AsyncMock(return_value=[0.9, 0.8, 0.7])
+        svc._embedding_service.dimension = 3
+        svc._vector_size = 3
+        svc._initialized = True
+        return svc
+
     @pytest.mark.asyncio
-    async def test_initialize(self, vector_store):
-        """Test initialize method."""
-        with patch('app.services.vector_store.Path') as mock_path:
-            mock_path.return_value = MagicMock()
-            with patch('app.services.vector_store.get_embedding_service') as mock_get:
-                mock_service = MagicMock()
-                mock_get.return_value = mock_service
-                
-                with patch('app.services.vector_store.chromadb.PersistentClient') as mock_client:
-                    mock_client.return_value = MagicMock()
-                    
-                    await vector_store.initialize()
-                    
-                    assert vector_store._initialized is True
-                    assert vector_store._client is not None
-    
+    async def test_get_or_create_collection(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="kolabri_course123")) as mock_ensure:
+            result = await vector_store_service.get_or_create_collection("course123")
+
+        assert result == "kolabri_course123"
+        mock_ensure.assert_awaited_once_with("kolabri_course123")
+
     @pytest.mark.asyncio
-    async def test_initialize_already_initialized(self, vector_store):
-        """Test initialize when already initialized."""
-        vector_store._initialized = True
-        vector_store._client = MagicMock()
-        
-        await vector_store.initialize()
-        
-        # Should not re-initialize
-        assert vector_store._initialized is True
-    
-    @pytest.mark.asyncio
-    async def test_ensure_collection(self, vector_store):
-        """Test _ensure_collection method."""
-        mock_collection = MagicMock()
-        mock_client = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_collection
-        vector_store._client = mock_client
-        
-        result = await vector_store._ensure_collection("test_collection")
-        
-        assert result == mock_collection
-        assert "test_collection" in vector_store._collections
-    
-    @pytest.mark.asyncio
-    async def test_ensure_collection_cached(self, vector_store):
-        """Test _ensure_collection returns cached collection."""
-        mock_collection = MagicMock()
-        vector_store._collections["cached"] = mock_collection
-        vector_store._client = MagicMock()
-        
-        result = await vector_store._ensure_collection("cached")
-        
-        assert result == mock_collection
-    
-    @pytest.mark.asyncio
-    async def test_ensure_collection_initializes_client(self, vector_store):
-        """Test _ensure_collection initializes client if needed."""
-        vector_store._client = None
-        vector_store._initialized = False
-        
-        async def mock_init_side_effect():
-            vector_store._initialized = True
-            vector_store._client = MagicMock()
-            vector_store._client.get_or_create_collection = MagicMock(return_value=MagicMock())
-            
-        with patch.object(vector_store, 'initialize', new_callable=AsyncMock, side_effect=mock_init_side_effect):
-            with patch.object(vector_store, '_collections', {}):
-                result = await vector_store._ensure_collection("test")
-                
-                assert result is not None
-    
-    def test_get_collection_name(self, vector_store):
-        """Test _get_collection_name method."""
-        with patch('app.services.vector_store.settings') as mock_settings:
-            mock_settings.CHROMA_COLLECTION_PREFIX = "prefix"
-            
-            result = vector_store._get_collection_name("course123")
-            
-            assert result == "prefix_course123"
-    
-    @pytest.mark.asyncio
-    async def test_get_or_create_collection(self, vector_store):
-        """Test get_or_create_collection method."""
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = MagicMock()
-            
-            result = await vector_store.get_or_create_collection("course123")
-            
-            assert result is not None
-            mock_ensure.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_add_documents(self, vector_store):
-        """Test add_documents method."""
-        mock_collection = MagicMock()
-        mock_collection.add = MagicMock()
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            await vector_store.add_documents(
+    async def test_add_documents_with_collection_name(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")) as mock_ensure, patch(
+            "app.services.vector_store.uuid.uuid5", side_effect=["uuid-1", "uuid-2"]
+        ) as mock_uuid, patch(
+            "app.services.vector_store.PointStruct", side_effect=lambda **kwargs: kwargs
+        ) as mock_point_struct:
+            await vector_store_service.add_documents(
                 documents=["doc1", "doc2"],
-                metadatas=[{"source": "test"}, {"source": "test2"}],
+                metadatas=[{"page": 1}, {"page": 2}],
                 ids=["id1", "id2"],
-                collection_name="test_collection"
+                collection_name="docs",
             )
-            
-            mock_collection.add.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_add_documents_with_course_id(self, vector_store):
-        """Test add_documents with course_id."""
-        mock_collection = MagicMock()
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            with patch('app.services.vector_store.settings') as mock_settings:
-                mock_settings.CHROMA_COLLECTION_PREFIX = "prefix"
-                
-                await vector_store.add_documents(
-                    documents=["doc1"],
-                    metadatas=[{}],
-                    ids=["id1"],
-                    course_id="course1"
-                )
-                
-                mock_ensure.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_search(self, vector_store):
-        """Test search method."""
-        mock_collection = MagicMock()
-        mock_collection.query.return_value = {
-            "documents": [["result1", "result2"]],
-            "metadatas": [[{"source": "test1"}, {"source": "test2"}]],
-            "distances": [[0.1, 0.2]],
+
+        mock_ensure.assert_awaited_once_with("docs")
+        vector_store_service._embedding_service.embed_texts.assert_awaited_once_with(["doc1", "doc2"])
+        assert mock_point_struct.call_count == 2
+        assert mock_uuid.call_count == 2
+        upsert_kwargs = vector_store_service._client.upsert.call_args.kwargs
+        assert upsert_kwargs["collection_name"] == "docs"
+        assert upsert_kwargs["points"][0]["payload"] == {
+            "page": 1,
+            "content": "doc1",
+            "document_id": "id1",
         }
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            results = await vector_store.search(
-                query="test query",
-                collection_name="test_collection",
-                n_results=2
-            )
-            
-            assert len(results) == 2
-            assert results[0]["content"] == "result1"
-            assert results[0]["metadata"] == {"source": "test1"}
-            assert results[0]["score"] > 0
-    
+        assert upsert_kwargs["points"][1]["vector"] == [0.4, 0.5, 0.6]
+
     @pytest.mark.asyncio
-    async def test_search_with_where(self, vector_store):
-        """Test search with metadata filter."""
-        mock_collection = MagicMock()
-        mock_collection.query.return_value = {
-            "documents": [["result"]],
-            "metadatas": [[{}]],
-            "distances": [[0.1]],
-        }
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            await vector_store.search(
-                query="test",
-                where={"course_id": "test"}
-            )
-            
-            mock_collection.query.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_search_collection_not_found(self, vector_store):
-        """Test search when collection not found."""
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.side_effect = Exception("Collection not found")
-            
-            results = await vector_store.search("query")
-            
-            assert results == []
-    
-    @pytest.mark.asyncio
-    async def test_query(self, vector_store):
-        """Test query method."""
-        mock_collection = MagicMock()
-        mock_collection.query.return_value = {
-            "documents": [["result"]],
-            "metadatas": [[{}]],
-            "distances": [[0.1]],
-        }
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            with patch('app.services.vector_store.settings') as mock_settings:
-                mock_settings.TOP_K_RESULTS = 5
-                
-                result = await vector_store.query(
-                    course_id="course1",
-                    query_text="test query"
-                )
-                
-                assert "documents" in result
-                assert "metadatas" in result
-                assert "distances" in result
-    
-    @pytest.mark.asyncio
-    async def test_query_custom_n_results(self, vector_store):
-        """Test query with custom n_results."""
-        mock_collection = MagicMock()
-        mock_collection.query.return_value = {
-            "documents": [[]],
-            "metadatas": [[]],
-            "distances": [[]],
-        }
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            await vector_store.query(
+    async def test_add_documents_with_course_id(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="kolabri_course1")) as mock_ensure, patch(
+            "app.services.vector_store.uuid.uuid5", return_value="uuid-1"
+        ), patch("app.services.vector_store.PointStruct", side_effect=lambda **kwargs: kwargs):
+            await vector_store_service.add_documents(
+                documents=["doc1"],
+                metadatas=[{"source": "pdf"}],
+                ids=["id1"],
                 course_id="course1",
-                query_text="test",
-                n_results=10
             )
-            
-            call_kwargs = mock_collection.query.call_args[1]
-            assert call_kwargs["n_results"] == 10
-    
+
+        mock_ensure.assert_awaited_once_with("kolabri_course1")
+
     @pytest.mark.asyncio
-    async def test_delete_documents(self, vector_store):
-        """Test delete_documents method."""
-        mock_collection = MagicMock()
-        mock_collection.delete = MagicMock()
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            await vector_store.delete_documents(
-                ids=["id1", "id2"],
-                collection_name="test_collection"
+    async def test_search_formats_qdrant_results(self, vector_store_service):
+        vector_store_service._client.query_points.return_value = SimpleNamespace(
+            points=[
+                _point("First", {"page": 1, "source": "a.pdf"}, 0.91),
+                _point("Second", {"page": 2}, 0.77),
+            ]
+        )
+
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")) as mock_ensure:
+            results = await vector_store_service.search(
+                query="hello",
+                collection_name="docs",
+                n_results=2,
             )
-            
-            mock_collection.delete.assert_called_once()
-    
+
+        mock_ensure.assert_awaited_once_with("docs")
+        vector_store_service._embedding_service.embed_query.assert_awaited_once_with("hello")
+        assert results == [
+            {"content": "First", "metadata": {"page": 1, "source": "a.pdf"}, "score": 0.91},
+            {"content": "Second", "metadata": {"page": 2}, "score": 0.77},
+        ]
+
     @pytest.mark.asyncio
-    async def test_delete_documents_with_where(self, vector_store):
-        """Test delete_documents with where filter."""
-        mock_collection = MagicMock()
-        
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.return_value = mock_collection
-            
-            await vector_store.delete_documents(
-                where={"course_id": "test"},
-                collection_name="test"
+    async def test_search_builds_filter_from_where(self, vector_store_service):
+        vector_store_service._client.query_points.return_value = SimpleNamespace(points=[])
+
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
+            "app.services.vector_store.MatchValue", side_effect=lambda **kwargs: {"match": kwargs}
+        ) as mock_match_value, patch(
+            "app.services.vector_store.FieldCondition", side_effect=lambda **kwargs: {"condition": kwargs}
+        ) as mock_field_condition, patch(
+            "app.services.vector_store.Filter", side_effect=lambda **kwargs: {"filter": kwargs}
+        ) as mock_filter:
+            await vector_store_service.search(
+                query="hello",
+                collection_name="docs",
+                n_results=3,
+                where={"course_id": "c1", "page": 2},
             )
-            
-            mock_collection.delete.assert_called_once()
-    
+
+        assert mock_match_value.call_count == 2
+        assert mock_field_condition.call_count == 2
+        mock_filter.assert_called_once()
+        query_kwargs = vector_store_service._client.query_points.call_args.kwargs
+        assert query_kwargs["query_filter"] == {
+            "filter": {
+                "must": [
+                    {"condition": {"key": "course_id", "match": {"match": {"value": "c1"}}}},
+                    {"condition": {"key": "page", "match": {"match": {"value": 2}}}},
+                ]
+            }
+        }
+
     @pytest.mark.asyncio
-    async def test_delete_documents_exception(self, vector_store):
-        """Test delete_documents handles exception."""
-        with patch.object(vector_store, '_ensure_collection', new_callable=AsyncMock) as mock_ensure:
-            mock_ensure.side_effect = Exception("Test error")
-            
-            with pytest.raises(Exception):
-                await vector_store.delete_documents(ids=["id1"])
-    
+    async def test_search_returns_empty_when_collection_lookup_fails(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(side_effect=Exception("missing"))):
+            result = await vector_store_service.search("hello")
+
+        assert result == []
+        vector_store_service._embedding_service.embed_query.assert_not_awaited()
+
     @pytest.mark.asyncio
-    async def test_delete_collection(self, vector_store):
-        """Test delete_collection method."""
-        mock_client = MagicMock()
-        mock_client.delete_collection = MagicMock()
-        vector_store._client = mock_client
-        vector_store._collections["to_delete"] = MagicMock()
-        
-        result = await vector_store.delete_collection("to_delete")
-        
+    async def test_query_returns_legacy_format_with_default_top_k(self, vector_store_service):
+        with patch.object(vector_store_service, "search", new=AsyncMock(return_value=[
+            {"content": "Doc A", "metadata": {"page": 1}, "score": 0.9},
+            {"content": "Doc B", "metadata": {"page": 2}, "score": 0.6},
+        ])) as mock_search, patch("app.services.vector_store.settings.TOP_K_RESULTS", 7):
+            result = await vector_store_service.query(course_id="course1", query_text="what?")
+
+        mock_search.assert_awaited_once_with(
+            query="what?",
+            collection_name="kolabri_course1",
+            n_results=7,
+        )
+        assert result == {
+            "documents": [["Doc A", "Doc B"]],
+            "metadatas": [[{"page": 1}, {"page": 2}]],
+            "distances": [[0.09999999999999998, 0.4]],
+        }
+
+    @pytest.mark.asyncio
+    async def test_query_respects_custom_n_results(self, vector_store_service):
+        with patch.object(vector_store_service, "search", new=AsyncMock(return_value=[])) as mock_search:
+            await vector_store_service.query(course_id="course1", query_text="what?", n_results=2)
+
+        mock_search.assert_awaited_once_with(
+            query="what?",
+            collection_name="kolabri_course1",
+            n_results=2,
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_documents_by_ids(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
+            "app.services.vector_store.uuid.uuid5", side_effect=["uuid-1", "uuid-2"]
+        ), patch("app.services.vector_store.models.PointIdsList", side_effect=lambda **kwargs: kwargs) as mock_ids_list:
+            await vector_store_service.delete_documents(ids=["id1", "id2"], collection_name="docs")
+
+        mock_ids_list.assert_called_once_with(points=["uuid-1", "uuid-2"])
+        vector_store_service._client.delete.assert_called_once_with(
+            collection_name="docs",
+            points_selector={"points": ["uuid-1", "uuid-2"]},
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_documents_by_where(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
+            "app.services.vector_store.MatchValue", side_effect=lambda **kwargs: {"match": kwargs}
+        ), patch(
+            "app.services.vector_store.FieldCondition", side_effect=lambda **kwargs: {"condition": kwargs}
+        ), patch(
+            "app.services.vector_store.Filter", side_effect=lambda **kwargs: {"filter": kwargs}
+        ), patch(
+            "app.services.vector_store.models.FilterSelector", side_effect=lambda **kwargs: kwargs
+        ) as mock_filter_selector:
+            await vector_store_service.delete_documents(where={"course_id": "c1"}, collection_name="docs")
+
+        mock_filter_selector.assert_called_once_with(
+            filter={
+                "filter": {
+                    "must": [
+                        {"condition": {"key": "course_id", "match": {"match": {"value": "c1"}}}}
+                    ]
+                }
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_documents_raises_on_error(self, vector_store_service):
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            with pytest.raises(RuntimeError, match="boom"):
+                await vector_store_service.delete_documents(ids=["id1"])
+
+    @pytest.mark.asyncio
+    async def test_delete_collection_success(self, vector_store_service):
+        result = await vector_store_service.delete_collection("docs")
+
         assert result is True
-        assert "to_delete" not in vector_store._collections
-    
+        vector_store_service._client.delete_collection.assert_called_once_with(collection_name="docs")
+
     @pytest.mark.asyncio
-    async def test_delete_collection_not_found(self, vector_store):
-        """Test delete_collection when not found."""
-        mock_client = MagicMock()
-        mock_client.delete_collection = MagicMock(side_effect=Exception("Not found"))
-        vector_store._client = mock_client
-        
-        result = await vector_store.delete_collection("nonexistent")
-        
+    async def test_delete_collection_failure(self, vector_store_service):
+        vector_store_service._client.delete_collection.side_effect = Exception("missing")
+
+        result = await vector_store_service.delete_collection("docs")
+
         assert result is False
-    
+
     @pytest.mark.asyncio
-    async def test_delete_collection_initializes_client(self, vector_store):
-        """Test delete_collection initializes client if needed."""
-        vector_store._client = None
-        
-        with patch.object(vector_store, 'initialize', new_callable=AsyncMock):
-            with patch('app.services.vector_store.chromadb.PersistentClient') as mock_client:
-                mock_client.return_value = MagicMock()
-                mock_client.return_value.delete_collection = MagicMock(side_effect=Exception("Not found"))
-                
-                await vector_store.delete_collection("test")
-    
+    async def test_list_collections(self, vector_store_service):
+        vector_store_service._client.get_collections.return_value = SimpleNamespace(
+            collections=[SimpleNamespace(name="c1"), SimpleNamespace(name="c2")]
+        )
+        vector_store_service._client.get_collection.side_effect = [
+            SimpleNamespace(points_count=5),
+            SimpleNamespace(points_count=9),
+        ]
+
+        result = await vector_store_service.list_collections()
+
+        assert result == [
+            {"name": "c1", "metadata": {}, "count": 5},
+            {"name": "c2", "metadata": {}, "count": 9},
+        ]
+
     @pytest.mark.asyncio
-    async def test_list_collections(self, vector_store):
-        """Test list_collections method."""
-        mock_col1 = MagicMock()
-        mock_col1.name = "collection1"
-        mock_col1.metadata = {}
-        mock_col1.count = MagicMock(return_value=10)
-        
-        mock_col2 = MagicMock()
-        mock_col2.name = "collection2"
-        mock_col2.metadata = {}
-        mock_col2.count = MagicMock(return_value=5)
-        
-        mock_client = MagicMock()
-        mock_client.list_collections = MagicMock(return_value=[mock_col1, mock_col2])
-        vector_store._client = mock_client
-        
-        result = await vector_store.list_collections()
-        
-        assert len(result) == 2
-        assert result[0]["name"] == "collection1"
-        assert result[0]["count"] == 10
-        assert result[1]["name"] == "collection2"
-        assert result[1]["count"] == 5
-    
-    @pytest.mark.asyncio
-    async def test_list_collections_initializes_client(self, vector_store):
-        """Test list_collections initializes client if needed."""
-        vector_store._client = None
-        
-        async def mock_init_side_effect():
-            vector_store._initialized = True
-            mock_client = MagicMock()
-            mock_col = MagicMock()
-            mock_col.name = "test"
-            mock_col.metadata = {}
-            mock_col.count = MagicMock(return_value=5)
-            mock_client.list_collections = MagicMock(return_value=[mock_col])
-            vector_store._client = mock_client
-            
-        with patch.object(vector_store, 'initialize', new_callable=AsyncMock, side_effect=mock_init_side_effect):
-            result = await vector_store.list_collections()
-            
-            assert len(result) == 1
-            assert result[0]["name"] == "test"
-    
-    @pytest.mark.asyncio
-    async def test_get_collection_stats(self, vector_store):
-        """Test get_collection_stats method."""
-        mock_collection = MagicMock()
-        mock_collection.count = MagicMock(return_value=25)
-        
-        with patch.object(vector_store, 'get_or_create_collection', new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_collection
-            
-            with patch.object(vector_store, '_get_collection_name') as mock_name:
-                mock_name.return_value = "prefix_course1"
-                
-                result = await vector_store.get_collection_stats("course1")
-                
-                assert result["course_id"] == "course1"
-                assert result["collection_name"] == "prefix_course1"
-                assert result["document_count"] == 25
+    async def test_get_collection_stats(self, vector_store_service):
+        vector_store_service._client.get_collection.return_value = SimpleNamespace(points_count=25)
+
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="kolabri_course1")) as mock_ensure:
+            result = await vector_store_service.get_collection_stats("course1")
+
+        mock_ensure.assert_awaited_once_with("kolabri_course1")
+        assert result == {
+            "course_id": "course1",
+            "collection_name": "kolabri_course1",
+            "document_count": 25,
+        }
 
 
 class TestGetVectorStore:
-    """Test get_vector_store singleton."""
-    
     def test_get_vector_store_singleton(self):
-        """Test get_vector_store returns singleton."""
-        from app.services import vector_store
         vector_store._vector_store = None
-        
+
         store1 = get_vector_store()
         store2 = get_vector_store()
-        
+
         assert store1 is store2
         assert isinstance(store1, VectorStoreService)
-    
-    def test_get_vector_store_initialization(self):
-        """Test get_vector_store initializes correctly."""
-        from app.services import vector_store
-        vector_store._vector_store = None
-        
-        store = get_vector_store()
-        
-        assert store is not None
-        assert isinstance(store, VectorStoreService)
-        assert store._initialized is False
+
+    def test_get_vector_store_returns_existing_instance(self):
+        existing = VectorStoreService()
+        vector_store._vector_store = existing
+
+        result = get_vector_store()
+
+        assert result is existing

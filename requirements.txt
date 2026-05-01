@@ -23,9 +23,9 @@ python-multipart==0.0.22
 # grpcio-status>=1.75.1
 # protobuf==5.29.6
 
-# Vector Database
-chromadb>=1.5.8
-chroma-hnswlib>=0.7.6
+# Vector Database (Qdrant) + Local Embedding
+qdrant-client[fastembed]>=1.9.0
+fastembed>=0.3.0
 
 # MongoDB Async Driver
 motor==3.6.0

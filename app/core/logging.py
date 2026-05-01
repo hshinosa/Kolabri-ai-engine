@@ -71,7 +71,7 @@ def setup_logging() -> None:
     
     # Reduce noise from third-party loggers
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
-    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("qdrant_client").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 

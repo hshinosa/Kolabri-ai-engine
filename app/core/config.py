@@ -45,18 +45,21 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: int = 2048
 
-    # Google Gemini API (Gemini 2.5 Flash) - Legacy, kept for compatibility
+    # Google Gemini API (Legacy, kept for compatibility)
     GOOGLE_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""  # Alias for GOOGLE_API_KEY
+    GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "models/text-embedding-004"
     GEMINI_TEMPERATURE: float = 0.7
     GEMINI_TOP_P: float = 0.95
     GEMINI_MAX_OUTPUT_TOKENS: int = 2048
 
-    # Vector Database (ChromaDB)
-    CHROMA_PERSIST_DIR: str = "./data/chroma"
-    CHROMA_COLLECTION_PREFIX: str = "kolabri"
+    # Vector Database (Qdrant)
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_COLLECTION_PREFIX: str = "kolabri"
+
+    # Embedding (Local FastEmbed)
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"
 
     # Document Processing
     MAX_FILE_SIZE_MB: int = 10
