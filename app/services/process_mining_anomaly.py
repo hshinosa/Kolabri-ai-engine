@@ -14,6 +14,7 @@ import statistics
 from app.core.logging import get_logger
 from app.core.config import settings
 from app.services.mongodb_logger import MongoDBLogger, get_mongo_logger
+from app.services.conformance_checker import ConformanceChecker
 
 logger = get_logger(__name__)
 
@@ -83,6 +84,7 @@ class ProcessMiningAnomalyDetector:
         self.mongo_logger = mongo_logger or get_mongo_logger()
         self._cache: Dict[str, Any] = {}
         self._cache_ttl = timedelta(minutes=5)
+        self._conformance_checker = ConformanceChecker()
         
         logger.info("process_mining_anomaly_detector_initialized")
     
@@ -179,6 +181,19 @@ class ProcessMiningAnomalyDetector:
             
             # Aggregate metrics
             metrics = self._calculate_session_metrics(events)
+            observed_sequence = [
+                event.get("metadata", {}).get("interactionType", "UNKNOWN")
+                for event in events
+            ]
+            conformance = self._conformance_checker.check(observed_sequence)
+            metrics["conformance"] = {
+                "is_conformant": conformance.is_conformant,
+                "alignment_score": conformance.alignment_score,
+                "token_replay_score": conformance.token_replay_score,
+                "missing_activities": conformance.missing_activities,
+                "extra_activities": conformance.extra_activities,
+                "alignment_details": conformance.alignment_details,
+            }
             for anomaly in valid_anomalies:
                 metrics.update(anomaly.metrics)
             
@@ -295,6 +310,19 @@ class ProcessMiningAnomalyDetector:
             
             # Calculate course metrics
             metrics = self._calculate_course_metrics(events)
+            observed_sequence = [
+                event.get("metadata", {}).get("interactionType", "UNKNOWN")
+                for event in events
+            ]
+            conformance = self._conformance_checker.check(observed_sequence)
+            metrics["conformance"] = {
+                "is_conformant": conformance.is_conformant,
+                "alignment_score": conformance.alignment_score,
+                "token_replay_score": conformance.token_replay_score,
+                "missing_activities": conformance.missing_activities,
+                "extra_activities": conformance.extra_activities,
+                "alignment_details": conformance.alignment_details,
+            }
             metrics["anomaly_summary"] = dict(anomaly_types)
             metrics["sessions_with_anomalies"] = len(session_anomalies)
             metrics["total_sessions"] = len(chat_space_events)

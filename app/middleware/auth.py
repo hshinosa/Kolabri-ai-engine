@@ -51,12 +51,7 @@ def validate_api_key(api_key: str) -> bool:
     if not api_key:
         return False
     
-    # Check against CORE_API_SECRET using constant-time comparison
     if hmac.compare_digest(api_key, settings.CORE_API_SECRET):
-        return True
-    
-    # Check against OPENAI_API_KEY using constant-time comparison
-    if hmac.compare_digest(api_key, settings.OPENAI_API_KEY):
         return True
     
     return False

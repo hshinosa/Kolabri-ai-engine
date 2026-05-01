@@ -31,6 +31,14 @@ async def test_query_blocked_by_guardrails(rag_pipeline, mock_deps):
     assert res.success is True
     assert res.answer == 'Blocked'
 
+
+def test_rag_result_additive_fields():
+    result = RAGResult(answer='Bot response', sources=[{'s':1}], query='q', tokens_used=50, success=True)
+    assert result.scaffolding_triggered is False
+    assert result.grounding_ratio == 1.0
+    assert result.srl_phase is None
+    assert result.srl_sub_phase is None
+
 @pytest.mark.asyncio
 async def test_query_fetch_success(rag_pipeline, mock_deps):
     mock_result = RAGResult(answer='RAG Answer', sources=[{'s':1}], query='q', tokens_used=50, success=True)

@@ -12,6 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.pii_detector import PIIDetector
 
 logger = get_logger(__name__)
 
@@ -22,6 +23,7 @@ class MongoDBLogger:
         self.client: Optional[AsyncIOMotorClient] = None
         self.db = None
         self.enabled = settings.ENABLE_MONGODB_LOGGING
+        self._pii_detector = PIIDetector()
         
     async def connect(self):
         """Establish and verify connection to MongoDB with connection pooling."""
@@ -66,6 +68,11 @@ class MongoDBLogger:
         if not self.enabled or self.db is None: return
             
         try:
+            attributes = entry.get("Attributes", {})
+            if isinstance(attributes, dict) and attributes.get("original_text"):
+                attributes["original_text"] = self._pii_detector.mask(str(attributes["original_text"]))
+                entry["Attributes"] = attributes
+
             if "Timestamp" not in entry:
                 entry["Timestamp"] = datetime.now()
             

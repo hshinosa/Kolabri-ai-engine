@@ -16,6 +16,9 @@ from enum import Enum
 
 from app.core.logging import get_logger
 from app.core.config import settings
+from app.services.injection_detector import InjectionDetector
+from app.services.toxicity_scorer import ToxicityScorer
+from app.services.pii_detector import PIIDetector
 
 logger = get_logger(__name__)
 
@@ -222,6 +225,9 @@ Mari fokus pada pembelajaran bersama!"""
         self._pii_patterns = [
             (re.compile(p, re.IGNORECASE), label) for p, label in self.PII_PATTERNS
         ]
+        self._injection_detector = InjectionDetector()
+        self._toxicity_scorer = ToxicityScorer()
+        self._pii_detector = PIIDetector()
         
         logger.info("guardrails_initialized")
     
@@ -238,6 +244,18 @@ Mari fokus pada pembelajaran bersama!"""
         """
         text_lower = text.lower().strip()
         triggered_rules = []
+
+        # 0. Check for prompt injection first
+        injection_result = self._check_prompt_injection(text)
+        if injection_result.action == GuardrailAction.BLOCK:
+            logger.warning(
+                "guardrail_blocked",
+                reason="prompt_injection",
+                text_preview=text[:50]
+            )
+            return injection_result
+        if injection_result.triggered_rules:
+            triggered_rules.extend(injection_result.triggered_rules)
         
         # 1. Check for harmful content first (highest priority)
         harmful_result = self._check_harmful_content(text_lower)
@@ -303,6 +321,25 @@ Mari fokus pada pembelajaran bersama!"""
             reason="all_checks_passed",
             triggered_rules=triggered_rules if triggered_rules else None,
             sanitized_input=toxicity_result.sanitized_input if toxicity_result.sanitized_input else text
+        )
+
+    def _check_prompt_injection(self, text: str) -> GuardrailResult:
+        """Detect prompt injection patterns using the injection detector."""
+        result = self._injection_detector.score(text)
+        if result.is_injection:
+            return GuardrailResult(
+                action=GuardrailAction.BLOCK,
+                reason="prompt_injection_detected",
+                message=self.REJECTION_MESSAGES['cheating'],
+                triggered_rules=[f"prompt_injection:{r}" for r in result.reasons],
+                confidence=result.score,
+            )
+
+        return GuardrailResult(
+            action=GuardrailAction.ALLOW,
+            reason="no_prompt_injection",
+            confidence=max(0.0, 1.0 - result.score),
+            triggered_rules=[f"prompt_injection:{r}" for r in result.reasons] if result.reasons else []
         )
     
     def _check_academic_dishonesty(self, text: str, text_lower: str) -> GuardrailResult:
@@ -392,52 +429,38 @@ Mari fokus pada pembelajaran bersama!"""
     
     def _check_pii(self, text: str) -> GuardrailResult:
         """Check for Personally Identifiable Information."""
-        detected_pii = []
-        
-        for pattern, pii_type in self._pii_patterns:
-            if pattern.search(text):
-                detected_pii.append(pii_type)
-        
-        if detected_pii:
-            pii_list = ", ".join(detected_pii)
+        result = self._pii_detector.detect(text)
+
+        if result.has_pii:
+            pii_list = ", ".join(result.labels)
             return GuardrailResult(
                 action=GuardrailAction.WARN,
                 reason="pii_detected",
                 message=self.REJECTION_MESSAGES['pii_warning'].format(pii_type=pii_list),
-                triggered_rules=detected_pii,
-                confidence=0.8
+                triggered_rules=result.labels,
+                sanitized_input=result.masked_text,
+                confidence=0.9,
             )
-        
-        return GuardrailResult(
-            action=GuardrailAction.ALLOW,
-            reason="no_pii_detected"
-        )
+
+        return GuardrailResult(action=GuardrailAction.ALLOW, reason="no_pii_detected")
     
     def _check_toxicity(self, text_lower: str) -> GuardrailResult:
-        """Check for toxic language."""
-        detected = []
-        sanitized = text_lower
-        
-        for keyword in self.TOXICITY_KEYWORDS:
-            if keyword in text_lower:
-                detected.append(f"toxicity:{keyword}")
-                # Sanitize by replacing with asterisks
-                sanitized = sanitized.replace(keyword, '*' * len(keyword))
-        
-        if detected:
+        """Check for toxic language using a score-based detector."""
+        result = self._toxicity_scorer.score(text_lower)
+        if result.is_toxic or result.score >= 0.5:
+            sanitized = text_lower
+            for label in result.labels:
+                sanitized = sanitized.replace(label, '*' * len(label))
             return GuardrailResult(
-                action=GuardrailAction.WARN,
+                action=GuardrailAction.WARN if result.score < 0.9 else GuardrailAction.SANITIZE,
                 reason="toxicity_detected",
                 message=self.REJECTION_MESSAGES['toxicity'],
-                triggered_rules=detected,
+                triggered_rules=[f"toxicity:{label}" for label in result.labels],
                 sanitized_input=sanitized,
-                confidence=0.7
+                confidence=result.score,
             )
-        
-        return GuardrailResult(
-            action=GuardrailAction.ALLOW,
-            reason="no_toxicity"
-        )
+
+        return GuardrailResult(action=GuardrailAction.ALLOW, reason="no_toxicity")
     
     def check_output(self, response: str, original_query: str, contexts: Optional[List[Dict[str, Any]]] = None) -> GuardrailResult:
         """

@@ -19,7 +19,7 @@ import hashlib
 import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-import aioredis
+import redis.asyncio as redis
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -69,7 +69,7 @@ class RedisCache:
         """Initialize Redis connection pool."""
         if self._redis is None:
             try:
-                self._redis = await aioredis.from_url(
+                self._redis = await redis.from_url(
                     f"redis://{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}",
                     encoding="utf-8",
                     decode_responses=True,

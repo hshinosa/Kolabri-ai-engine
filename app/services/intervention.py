@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import get_logger
+from app.core.prompt_styles import GROUP_INTERVENTION_STYLE
 from app.services.llm import OpenAILLMService, get_llm_service
 
 logger = get_logger(__name__)
@@ -237,8 +238,8 @@ Buatkan 1-2 pertanyaan yang:
         try:
             llm_response = await self.llm_service.generate(
                 prompt=prompt,
-                system_prompt="""Anda adalah fasilitator diskusi akademik.
-Buat pertanyaan yang memicu diskusi mendalam dan bermakna.""",
+                system_prompt="""Anda adalah fasilitator diskusi akademik Kolabri.
+Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENTION_STYLE,
                 temperature=0.8,  # More creative for prompts
             )
 

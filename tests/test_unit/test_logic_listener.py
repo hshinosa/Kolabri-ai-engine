@@ -339,10 +339,8 @@ async def test_off_topic_check_resets_on_relevant(listener):
 
 def test_cosine_similarity_calculation(listener):
     """Test cosine similarity calculation."""
-    import numpy as np
-    
-    vec1 = np.array([1, 2, 3, 4, 5])
-    vec2 = np.array([1, 2, 3, 4, 5])  # Identical vectors
+    vec1 = [1, 2, 3, 4, 5]
+    vec2 = [1, 2, 3, 4, 5]  # Identical vectors
     
     similarity = listener._calculate_cosine_similarity(vec1, vec2)
     
@@ -351,10 +349,8 @@ def test_cosine_similarity_calculation(listener):
 
 def test_cosine_similarity_opposite_vectors(listener):
     """Test cosine similarity for opposite vectors."""
-    import numpy as np
-    
-    vec1 = np.array([1, 1, 1, 1, 1])
-    vec2 = np.array([-1, -1, -1, -1, -1])
+    vec1 = [1, 1, 1, 1, 1]
+    vec2 = [-1, -1, -1, -1, -1]
     
     similarity = listener._calculate_cosine_similarity(vec1, vec2)
     
@@ -363,10 +359,8 @@ def test_cosine_similarity_opposite_vectors(listener):
 
 def test_cosine_similarity_orthogonal_vectors(listener):
     """Test cosine similarity for orthogonal vectors."""
-    import numpy as np
-    
-    vec1 = np.array([1, 0, 0, 0])
-    vec2 = np.array([0, 1, 0, 0])
+    vec1 = [1, 0, 0, 0]
+    vec2 = [0, 1, 0, 0]
     
     similarity = listener._calculate_cosine_similarity(vec1, vec2)
     
@@ -375,10 +369,8 @@ def test_cosine_similarity_orthogonal_vectors(listener):
 
 def test_cosine_similarity_zero_vectors(listener):
     """Test that zero vectors return 0."""
-    import numpy as np
-    
-    vec1 = np.array([0, 0, 0, 0])
-    vec2 = np.array([1, 2, 3, 4])
+    vec1 = [0, 0, 0, 0]
+    vec2 = [1, 2, 3, 4]
     
     similarity = listener._calculate_cosine_similarity(vec1, vec2)
     

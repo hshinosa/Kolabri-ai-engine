@@ -1,36 +1,36 @@
-"""
-Tests for Intervention Service - 100% Coverage
-"""
-import pytest
+"""Tests for chat intervention service."""
+
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.services import intervention
 from app.services.intervention import (
     ChatInterventionService,
-    InterventionType,
     InterventionResult,
+    InterventionType,
     get_intervention_service,
 )
+from app.services.llm import LLMResponse
 
 
 class TestInterventionResult:
-    """Test InterventionResult dataclass."""
-    
     def test_intervention_result_success(self):
-        """Test InterventionResult with success."""
         result = InterventionResult(
             message="Test message",
             intervention_type=InterventionType.REDIRECT,
             confidence=0.85,
             should_intervene=True,
             reason="Off-topic detected",
-            success=True
+            success=True,
         )
+
         assert result.message == "Test message"
         assert result.should_intervene is True
         assert result.error is None
-    
+
     def test_intervention_result_with_error(self):
-        """Test InterventionResult with error."""
         result = InterventionResult(
             message="",
             intervention_type=InterventionType.PROMPT,
@@ -38,17 +38,15 @@ class TestInterventionResult:
             should_intervene=False,
             reason="Error occurred",
             success=False,
-            error="Test error"
+            error="Test error",
         )
+
         assert result.success is False
         assert result.error == "Test error"
 
 
 class TestInterventionType:
-    """Test InterventionType enum."""
-    
     def test_intervention_type_values(self):
-        """Test InterventionType enum values."""
         assert InterventionType.REDIRECT.value == "redirect"
         assert InterventionType.PROMPT.value == "prompt"
         assert InterventionType.SUMMARIZE.value == "summarize"
@@ -57,306 +55,305 @@ class TestInterventionType:
         assert InterventionType.ENCOURAGE.value == "encourage"
 
 
-class TestChatInterventionService:
-    """Test ChatInterventionService class."""
-    
-    @pytest.fixture
-    def mock_llm(self):
-        """Create mock LLM service."""
-        mock = MagicMock()
-        mock.generate = AsyncMock(return_value=MagicMock(
-            content="Test response",
+@pytest.fixture
+def mock_llm():
+    mock = MagicMock()
+    mock.generate = AsyncMock(
+        return_value=LLMResponse(
+            content="Prompt response",
             tokens_used=50,
-            success=True
-        ))
-        return mock
-    
-    @pytest.fixture
-    def intervention_service(self, mock_llm):
-        """Create intervention service with mock LLM."""
-        return ChatInterventionService(llm_service=mock_llm)
-    
+            model="mock-model",
+            success=True,
+        )
+    )
+    mock.generate_intervention = AsyncMock(
+        return_value=LLMResponse(
+            content="Intervention response",
+            tokens_used=60,
+            model="mock-model",
+            success=True,
+        )
+    )
+    mock.generate_summary = AsyncMock(
+        return_value=LLMResponse(
+            content="Summary response",
+            tokens_used=70,
+            model="mock-model",
+            success=True,
+        )
+    )
+    return mock
+
+
+@pytest.fixture
+def intervention_service(mock_llm):
+    return ChatInterventionService(llm_service=mock_llm)
+
+
+class TestChatInterventionService:
     @pytest.mark.asyncio
     async def test_analyze_and_intervene_no_messages(self, intervention_service):
-        """Test analyze_and_intervene with no messages."""
         result = await intervention_service.analyze_and_intervene(
             messages=[],
             topic="Test topic",
-            chat_room_id="room_1"
+            chat_room_id="room_1",
         )
-        
+
         assert result.success is True
         assert result.should_intervene is False
         assert result.reason == "No messages to analyze"
-    
+
     @pytest.mark.asyncio
-    async def test_analyze_and_intervene_with_messages(self, intervention_service):
-        """Test analyze_and_intervene with messages."""
+    async def test_analyze_and_intervene_no_trigger(self, intervention_service, mock_llm):
         messages = [
-            {"sender": "User1", "content": "Hello"},
-            {"sender": "User2", "content": "Hi there"},
+            {"sender": "User1", "content": "Test topic ini menarik"},
+            {"sender": "User2", "content": "Saya setuju topik ini penting"},
         ]
-        
-        result = await intervention_service.analyze_and_intervene(
-            messages=messages,
-            topic="Test topic",
-            chat_room_id="room_1"
-        )
-        
-        assert result.success is True
-        assert result is not None
-    
-    @pytest.mark.asyncio
-    async def test_analyze_and_intervene_recent_intervention(self, intervention_service):
-        """Test analyze_and_intervene with recent intervention."""
-        messages = [{"sender": "User1", "content": "Hello"}]
-        recent_time = datetime.now()
-        
+
         result = await intervention_service.analyze_and_intervene(
             messages=messages,
             topic="Test topic",
             chat_room_id="room_1",
-            last_intervention_time=recent_time
         )
-        
+
         assert result.success is True
-    
+        assert result.should_intervene is False
+        mock_llm.generate_intervention.assert_not_awaited()
+
     @pytest.mark.asyncio
-    async def test_check_triggers(self, intervention_service):
-        """Test _check_triggers method."""
+    async def test_analyze_and_intervene_off_topic_generates_message(self, intervention_service, mock_llm):
         messages = [
-            {"sender": "User1", "content": "Test message 1"},
-            {"sender": "User2", "content": "Test message 2"},
+            {"sender": "User1", "content": "Kami membahas film dan kopi"},
+            {"sender": "User2", "content": "Bukan soal akademik sama sekali"},
+            {"sender": "User3", "content": "Besok nonton dimana?"},
+            {"sender": "User1", "content": "Saya suka stadion"},
+            {"sender": "User2", "content": "Musik juga seru"},
         ]
-        
+
+        result = await intervention_service.analyze_and_intervene(
+            messages=messages,
+            topic="Machine Learning",
+            chat_room_id="room_1",
+        )
+
+        assert result.success is True
+        assert result.should_intervene is True
+        assert result.intervention_type == InterventionType.REDIRECT
+        assert result.message == "Intervention response"
+        mock_llm.generate_intervention.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_analyze_and_intervene_generation_failure(self, intervention_service, mock_llm):
+        mock_llm.generate_intervention.side_effect = Exception("boom")
+        messages = [
+            {"sender": "User1", "content": "Kami membahas film dan kopi"},
+            {"sender": "User2", "content": "Bukan soal akademik sama sekali"},
+            {"sender": "User3", "content": "Besok nonton dimana?"},
+            {"sender": "User1", "content": "Saya suka stadion"},
+            {"sender": "User2", "content": "Musik juga seru"},
+        ]
+
+        result = await intervention_service.analyze_and_intervene(
+            messages=messages,
+            topic="Machine Learning",
+            chat_room_id="room_1",
+        )
+
+        assert result.success is False
+        assert result.should_intervene is False
+        assert "Generation failed" in result.reason
+        assert result.error == "boom"
+
+    @pytest.mark.asyncio
+    async def test_check_triggers_detects_inactivity(self, intervention_service):
+        stale_time = datetime.now() - timedelta(minutes=45)
+        messages = [{"sender": "User1", "content": "Hello", "timestamp": stale_time}]
+
         triggers = await intervention_service._check_triggers(
             messages=messages,
             topic="Test topic",
-            last_intervention_time=None
+            last_intervention_time=None,
         )
-        
-        assert isinstance(triggers, dict)
-    
+
+        assert triggers["inactive"] is True
+        assert triggers["should_intervene"] is True
+
     @pytest.mark.asyncio
-    async def test_check_triggers_with_recent_intervention(self, intervention_service):
-        """Test _check_triggers with recent intervention."""
-        messages = [{"sender": "User1", "content": "Hello"}]
-        recent_time = datetime.now()
-        
+    async def test_check_triggers_detects_summary_need(self, intervention_service):
+        now = datetime.now()
+        last_intervention_time = now - timedelta(minutes=20)
+        messages = [
+            {"sender": f"User{i}", "content": f"Pesan {i}", "timestamp": now.isoformat()}
+            for i in range(10)
+        ]
+
         triggers = await intervention_service._check_triggers(
             messages=messages,
-            topic="Test topic",
-            last_intervention_time=recent_time
+            topic="Topik diskusi",
+            last_intervention_time=last_intervention_time,
         )
-        
-        assert triggers.get("recent_intervention") is True
-    
+
+        assert triggers["needs_summary"] is True
+
     @pytest.mark.asyncio
-    async def test_select_intervention(self, intervention_service):
-        """Test _select_intervention method."""
-        triggers = {
-            "off_topic": True,
-            "inactive": False,
-            "needs_summary": False,
-            "low_engagement": False,
-        }
-        
-        intervention_type, confidence, reason = intervention_service._select_intervention(triggers)
-        
-        assert intervention_type is not None
-        assert isinstance(confidence, float)
-        assert isinstance(reason, str)
-    
-    @pytest.mark.asyncio
-    async def test_select_intervention_no_triggers(self, intervention_service):
-        """Test _select_intervention with no triggers."""
-        triggers = {
-            "off_topic": False,
-            "inactive": False,
-            "needs_summary": False,
-            "low_engagement": False,
-        }
-        
-        intervention_type, confidence, reason = intervention_service._select_intervention(triggers)
-        
+    async def test_check_triggers_detects_off_topic(self, intervention_service):
+        messages = [
+            {"sender": "User1", "content": "film kopi musik stadion"},
+            {"sender": "User2", "content": "liburan konser hujan jalan"},
+            {"sender": "User3", "content": "pantai game makanan kamera"},
+            {"sender": "User4", "content": "cuaca tiket motor basket"},
+            {"sender": "User5", "content": "nonton laptop meja sepatu"},
+        ]
+
+        triggers = await intervention_service._check_triggers(
+            messages=messages,
+            topic="Machine Learning",
+            last_intervention_time=None,
+        )
+
+        assert triggers["off_topic"] is True
+        assert triggers["should_intervene"] is True
+        assert triggers["off_topic_score"] > 0.6
+
+    def test_select_intervention(self, intervention_service):
+        intervention_type, confidence, reason = intervention_service._select_intervention(
+            {
+                "off_topic": True,
+                "off_topic_score": 0.9,
+                "inactive": False,
+                "needs_summary": False,
+                "low_engagement": False,
+            }
+        )
+
+        assert intervention_type == InterventionType.REDIRECT
+        assert confidence == 0.9
+        assert "off-topic" in reason.lower()
+
+    def test_select_intervention_no_triggers(self, intervention_service):
+        intervention_type, confidence, reason = intervention_service._select_intervention(
+            {
+                "off_topic": False,
+                "inactive": False,
+                "needs_summary": False,
+                "low_engagement": False,
+            }
+        )
+
         assert intervention_type == InterventionType.ENCOURAGE
         assert confidence == 0.0
-    
-    @pytest.mark.asyncio
-    async def test_select_intervention_multiple_triggers(self, intervention_service):
-        """Test _select_intervention with multiple triggers."""
-        triggers = {
-            "off_topic": True,
-            "inactive": True,
-            "needs_summary": True,
-            "low_engagement": False,
-        }
-        
-        intervention_type, confidence, reason = intervention_service._select_intervention(triggers)
-        
-        assert intervention_type is not None
-    
-    @pytest.mark.asyncio
-    async def test_generate_redirect_message(self, intervention_service, mock_llm):
-        """Test _generate_redirect_message."""
-        topic = "Machine Learning"
-        off_topic_messages = [
-            {"sender": "User1", "content": "Did you see the game last night?"}
-        ]
-        
-        result = await intervention_service._generate_redirect_message(
-            topic=topic,
-            off_topic_messages=off_topic_messages
+        assert reason == "No intervention needed"
+
+    def test_select_intervention_multiple_triggers_prioritizes_off_topic(self, intervention_service):
+        intervention_type, confidence, reason = intervention_service._select_intervention(
+            {
+                "off_topic": True,
+                "off_topic_score": 0.75,
+                "inactive": True,
+                "needs_summary": True,
+                "low_engagement": True,
+            }
         )
-        
-        assert result is not None
-        assert "Machine Learning" in result or "topik" in result.lower()
-    
+
+        assert intervention_type == InterventionType.REDIRECT
+        assert confidence == 0.75
+        assert "off-topic" in reason.lower()
+
     @pytest.mark.asyncio
-    async def test_generate_prompt_message(self, intervention_service, mock_llm):
-        """Test _generate_prompt_message."""
-        topic = "AI Ethics"
-        last_messages = [
-            {"sender": "User1", "content": "I don't know what to say"}
-        ]
-        
-        result = await intervention_service._generate_prompt_message(
-            topic=topic,
-            last_messages=last_messages
+    async def test_generate_summary_not_enough_messages(self, intervention_service):
+        result = await intervention_service.generate_summary(
+            messages=[{"sender": "User1", "content": "Short"}],
+            chat_room_id="room_1",
         )
-        
-        assert result is not None
-    
+
+        assert result.success is True
+        assert result.should_intervene is False
+        assert "Belum cukup pesan" in result.message
+
     @pytest.mark.asyncio
-    async def test_generate_summary_message(self, intervention_service, mock_llm):
-        """Test _generate_summary_message."""
-        messages = [
-            {"sender": "User1", "content": "Machine learning is interesting"},
-            {"sender": "User2", "content": "Yes, I agree"},
-            {"sender": "User1", "content": "Neural networks are cool"},
-        ]
-        
-        result = await intervention_service._generate_summary_message(messages)
-        
-        assert result is not None
-    
+    async def test_generate_summary_success(self, intervention_service, mock_llm):
+        messages = [{"sender": f"User{i}", "content": f"Pesan {i}"} for i in range(10)]
+
+        result = await intervention_service.generate_summary(messages=messages, chat_room_id="room_1")
+
+        assert result.success is True
+        assert result.should_intervene is True
+        assert result.intervention_type == InterventionType.SUMMARIZE
+        assert result.message == "Summary response"
+        mock_llm.generate_summary.assert_awaited_once_with(messages=messages, include_action_items=True)
+
     @pytest.mark.asyncio
-    async def test_generate_clarification_message(self, intervention_service, mock_llm):
-        """Test _generate_clarification_message."""
-        unclear_message = {"sender": "User1", "content": "That thing is weird"}
-        
-        result = await intervention_service._generate_clarification_message(unclear_message)
-        
-        assert result is not None
-    
+    async def test_generate_summary_failure(self, intervention_service, mock_llm):
+        mock_llm.generate_summary.side_effect = Exception("summary boom")
+        messages = [{"sender": f"User{i}", "content": f"Pesan {i}"} for i in range(10)]
+
+        result = await intervention_service.generate_summary(messages=messages, chat_room_id="room_1")
+
+        assert result.success is False
+        assert result.should_intervene is False
+        assert result.error == "summary boom"
+
     @pytest.mark.asyncio
-    async def test_check_off_topic(self, intervention_service):
-        """Test _check_off_topic method."""
-        messages = [
-            {"sender": "User1", "content": "Let's talk about movies"},
-            {"sender": "User2", "content": "Great idea!"},
-        ]
-        topic = "Machine Learning"
-        
-        is_off_topic, confidence = await intervention_service._check_off_topic(messages, topic)
-        
-        assert isinstance(is_off_topic, bool)
-        assert isinstance(confidence, float)
-    
-    @pytest.mark.asyncio
-    async def test_check_inactivity(self, intervention_service):
-        """Test _check_inactivity method."""
-        messages = [
-            {"sender": "User1", "content": "Hello", "timestamp": datetime.now()}
-        ]
-        
-        is_inactive, minutes = intervention_service._check_inactivity(messages)
-        
-        assert isinstance(is_inactive, bool)
-        assert isinstance(minutes, (int, float))
-    
-    @pytest.mark.asyncio
-    async def test_check_engagement_quality(self, intervention_service):
-        """Test _check_engagement_quality method."""
-        messages = [
-            {"sender": "User1", "content": "Short"},
-            {"sender": "User2", "content": "OK"},
-        ]
-        
-        is_low_quality, avg_length = intervention_service._check_engagement_quality(messages)
-        
-        assert isinstance(is_low_quality, bool)
-        assert isinstance(avg_length, (int, float))
-    
-    @pytest.mark.asyncio
-    async def test_check_needs_summary(self, intervention_service):
-        """Test _check_needs_summary method."""
-        messages = [{"sender": f"User{i}", "content": f"Message {i}"} for i in range(15)]
-        
-        needs_summary, message_count = intervention_service._check_needs_summary(messages)
-        
-        assert isinstance(needs_summary, bool)
-        assert message_count == 15
-    
-    @pytest.mark.asyncio
-    async def test_get_intervention_message(self, intervention_service, mock_llm):
-        """Test _get_intervention_message method."""
-        intervention_type = InterventionType.REDIRECT
-        context = {"topic": "Test topic"}
-        
-        result = await intervention_service._get_intervention_message(intervention_type, context)
-        
-        assert result is not None
-    
-    @pytest.mark.asyncio
-    async def test_get_intervention_message_redirect(self, intervention_service, mock_llm):
-        """Test _get_intervention_message for redirect."""
-        context = {"topic": "AI"}
-        result = await intervention_service._get_intervention_message(
-            InterventionType.REDIRECT, context
+    async def test_generate_discussion_prompt_success(self, intervention_service, mock_llm):
+        result = await intervention_service.generate_discussion_prompt(
+            topic="AI Ethics",
+            context="Fokus pada dampak sosial",
+            difficulty="hard",
         )
-        assert result is not None
-    
+
+        assert result.success is True
+        assert result.should_intervene is True
+        assert result.intervention_type == InterventionType.PROMPT
+        assert result.message == "Prompt response"
+        mock_llm.generate.assert_awaited_once()
+        called_prompt = mock_llm.generate.await_args.kwargs["prompt"]
+        assert "AI Ethics" in called_prompt
+        assert "Fokus pada dampak sosial" in called_prompt
+        assert "hard" in called_prompt
+
     @pytest.mark.asyncio
-    async def test_get_intervention_message_prompt(self, intervention_service, mock_llm):
-        """Test _get_intervention_message for prompt."""
-        context = {"topic": "ML"}
-        result = await intervention_service._get_intervention_message(
-            InterventionType.PROMPT, context
+    async def test_generate_discussion_prompt_unsuccessful_llm_response(self, intervention_service, mock_llm):
+        mock_llm.generate.return_value = LLMResponse(
+            content="",
+            tokens_used=0,
+            model="mock-model",
+            success=False,
+            error="llm failed",
         )
-        assert result is not None
-    
+
+        result = await intervention_service.generate_discussion_prompt(topic="AI Ethics")
+
+        assert result.success is False
+        assert result.should_intervene is False
+        assert result.error == "llm failed"
+
     @pytest.mark.asyncio
-    async def test_get_intervention_message_summarize(self, intervention_service, mock_llm):
-        """Test _get_intervention_message for summarize."""
-        context = {"messages": []}
-        result = await intervention_service._get_intervention_message(
-            InterventionType.SUMMARIZE, context
-        )
-        assert result is not None
+    async def test_generate_discussion_prompt_exception(self, intervention_service, mock_llm):
+        mock_llm.generate.side_effect = Exception("prompt boom")
+
+        result = await intervention_service.generate_discussion_prompt(topic="AI Ethics")
+
+        assert result.success is False
+        assert result.should_intervene is False
+        assert result.error == "prompt boom"
 
 
 class TestGetInterventionService:
-    """Test get_intervention_service singleton."""
-    
     def test_get_intervention_service_singleton(self):
-        """Test get_intervention_service returns singleton."""
-        from app.services import intervention
         intervention._intervention_service = None
-        
-        service1 = get_intervention_service()
-        service2 = get_intervention_service()
-        
+
+        with patch("app.services.intervention.get_llm_service", return_value=MagicMock()):
+            service1 = get_intervention_service()
+            service2 = get_intervention_service()
+
         assert service1 is service2
         assert isinstance(service1, ChatInterventionService)
-    
-    def test_get_intervention_service_with_llm(self):
-        """Test get_intervention_service with custom LLM."""
-        from app.services import intervention
+
+    def test_get_intervention_service_uses_get_llm_service(self):
         intervention._intervention_service = None
-        
-        mock_llm = MagicMock()
-        service = get_intervention_service(llm_service=mock_llm)
-        
-        assert service is not None
-        assert service.llm_service is mock_llm
+        mock_service = MagicMock()
+
+        with patch("app.services.intervention.get_llm_service", return_value=mock_service):
+            service = get_intervention_service()
+
+        assert service.llm_service is mock_service

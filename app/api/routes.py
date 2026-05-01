@@ -23,10 +23,11 @@ from fastapi import (
     HTTPException,
     Query,
 )
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.prompt_styles import PERSONAL_CHAT_STYLE
 from app.services.document_processor import get_document_processor
 
 # [PRIORITY 1] Optimized services dengan connection pooling & caching
@@ -81,6 +82,8 @@ from app.api.schemas import (
     ProcessMiningExportResponse,
     GuardrailCheckRequest,
     GuardrailCheckResponse,
+    PersonalChatRequest,
+    PersonalChatResponse,
 )
 from app.core.guardrails import get_guardrails, GuardrailAction
 from app.services.export_service import get_export_service
@@ -93,6 +96,13 @@ logger = get_logger(__name__)
 
 # Router for API endpoints
 router = APIRouter()
+
+PERSONAL_CHAT_SYSTEM_PROMPT = (
+    "Kamu adalah Kolabri AI, asisten belajar cerdas untuk mahasiswa. "
+    "Bantu mahasiswa memahami materi, menjawab pertanyaan akademik maupun pertanyaan personal ringan dengan penjelasan yang jelas, akurat, suportif, dan edukatif. "
+    "Jawab dalam Bahasa Indonesia kecuali diminta sebaliknya. "
+    + PERSONAL_CHAT_STYLE
+)
 
 # Course ID validation pattern (alphanumeric, underscore, hyphen only)
 COURSE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
@@ -178,6 +188,90 @@ async def ask_question(request: AskRequest):
             success=False,
             error=str(e),
         )
+
+
+@router.post(
+    "/chat/personal",
+    response_model=PersonalChatResponse,
+    tags=["Core-API Integration"],
+    summary="Personal AI chat (multi-turn, no RAG)",
+)
+async def personal_chat(request: PersonalChatRequest):
+    try:
+        llm = get_llm_service()
+
+        messages = [
+            {"role": "system", "content": PERSONAL_CHAT_SYSTEM_PROMPT},
+        ]
+
+        for msg in request.history[-20:]:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        messages.append({"role": "user", "content": request.message})
+
+        response = await llm.client.chat.completions.create(
+            model=llm.model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2048,
+        )
+
+        reply = response.choices[0].message.content or ""
+        tokens = response.usage.total_tokens if response.usage else 0
+
+        return PersonalChatResponse(reply=reply, success=True, tokens_used=tokens)
+
+    except Exception as e:
+        logger.error("personal_chat_failed", error=str(e))
+        return PersonalChatResponse(
+            reply="Maaf, terjadi kesalahan. Silakan coba lagi.",
+            success=False,
+            error=str(e),
+        )
+
+
+@router.post(
+    "/chat/personal/stream",
+    tags=["Core-API Integration"],
+    summary="Personal AI chat with SSE streaming",
+)
+async def personal_chat_stream(request: PersonalChatRequest):
+    import json as _json
+
+    llm = get_llm_service()
+
+    messages = [
+        {"role": "system", "content": PERSONAL_CHAT_SYSTEM_PROMPT},
+    ]
+
+    for msg in request.history[-20:]:
+        messages.append({"role": msg.role, "content": msg.content})
+
+    messages.append({"role": "user", "content": request.message})
+
+    async def event_generator():
+        try:
+            stream = await llm.client.chat.completions.create(
+                model=llm.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2048,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield f"data: {_json.dumps({'content': delta.content})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.error("personal_chat_stream_failed", error=str(e))
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post(
@@ -1279,3 +1373,325 @@ async def get_high_frequency_queries(
         raise HTTPException(
             status_code=500, detail=f"Failed to get high frequency queries: {str(e)}"
         )
+
+
+# ============== Integration Endpoints (Core API <-> AI Engine) ==============
+# These endpoints are called by Kolabri-core-api's AIEngineService
+
+
+@router.post(
+    "/chat",
+    response_model=OrchestrationResponse,
+    tags=["Orchestration"],
+    summary="Orchestrated chat message processing",
+    description="Process a student message through the full orchestration pipeline with NLP analysis, RAG, and intervention triggers.",
+)
+async def orchestrated_chat(request: OrchestrationRequest):
+    """
+    Main orchestrated chat endpoint called by Core API.
+    Processes student messages through:
+    - NLP engagement analysis
+    - Policy-based RAG (FETCH/NO_FETCH)
+    - Automatic intervention triggers
+    - Process Mining event logging
+    """
+    try:
+        orchestrator = get_orchestrator()
+        result = await orchestrator.handle_message(
+            user_id=request.user_id,
+            group_id=request.group_id,
+            message=request.message,
+            topic=request.topic,
+            collection_name=request.collection_name,
+            course_id=request.course_id,
+            chat_room_id=request.chat_room_id,
+        )
+
+        return OrchestrationResponse(
+            success=result.success,
+            bot_response=result.reply,
+            system_intervention=result.intervention,
+            intervention_type=result.intervention_type,
+            action_taken=result.action_taken,
+            should_notify_teacher=result.should_notify_teacher,
+            quality_score=result.quality_score,
+            meta=result.analytics,
+            error=result.error,
+        )
+
+    except Exception as e:
+        logger.error("orchestrated_chat_failed", error=str(e))
+        return OrchestrationResponse(
+            success=False,
+            bot_response="Maaf, terjadi kesalahan sistem.",
+            action_taken="ERROR",
+            should_notify_teacher=False,
+            error=str(e),
+        )
+
+
+@router.post(
+    "/intervention/analyze",
+    response_model=InterventionResponse,
+    tags=["Intervention"],
+    summary="Analyze chat for intervention needs",
+    description="Analyze a group chat conversation and determine if AI intervention is needed.",
+)
+async def analyze_intervention(request: InterventionRequest):
+    """
+    Analyze chat messages and determine if pedagogical intervention is needed.
+    Called by Core API's analyzeIntervention method.
+    """
+    try:
+        intervention_service = get_intervention_service()
+
+        # Convert schema messages to dict format expected by service
+        messages_dicts = [
+            {
+                "sender": msg.sender,
+                "content": msg.content,
+                "timestamp": msg.timestamp,
+                "sender_id": msg.sender_id,
+            }
+            for msg in request.messages
+        ]
+
+        result = await intervention_service.analyze_and_intervene(
+            messages=messages_dicts,
+            topic=request.topic,
+            chat_room_id=request.chat_room_id,
+        )
+
+        return InterventionResponse(
+            success=result.success,
+            should_intervene=result.should_intervene,
+            message=result.message,
+            intervention_type=result.intervention_type.value if hasattr(result.intervention_type, 'value') else str(result.intervention_type),
+            confidence=result.confidence,
+            reason=result.reason,
+            error=result.error,
+        )
+
+    except Exception as e:
+        logger.error("intervention_analysis_failed", error=str(e))
+        return InterventionResponse(
+            success=False,
+            should_intervene=False,
+            message="",
+            intervention_type="error",
+            confidence=0,
+            reason=str(e),
+            error=str(e),
+        )
+
+
+@router.post(
+    "/intervention/summary",
+    response_model=SummaryResponse,
+    tags=["Intervention"],
+    summary="Generate discussion summary",
+    description="Generate a summary of a group chat discussion with optional action items.",
+)
+async def generate_summary(request: SummaryRequest):
+    """
+    Generate a discussion summary from chat messages.
+    Called by Core API's generateSummary method.
+    """
+    try:
+        intervention_service = get_intervention_service()
+
+        # Convert schema messages to dict format
+        messages_dicts = [
+            {
+                "sender": msg.sender,
+                "content": msg.content,
+                "timestamp": msg.timestamp,
+                "sender_id": msg.sender_id,
+            }
+            for msg in request.messages
+        ]
+
+        result = await intervention_service.generate_summary(
+            messages=messages_dicts,
+            chat_room_id=request.chat_room_id,
+        )
+
+        return SummaryResponse(
+            success=result.success,
+            summary=result.message,
+            message_count=len(request.messages),
+            error=result.error,
+        )
+
+    except Exception as e:
+        logger.error("summary_generation_failed", error=str(e))
+        return SummaryResponse(
+            success=False,
+            summary="",
+            message_count=len(request.messages),
+            error=str(e),
+        )
+
+
+@router.post(
+    "/intervention/prompt",
+    response_model=PromptResponse,
+    tags=["Intervention"],
+    summary="Generate discussion prompt",
+    description="Generate a discussion prompt for a given topic to stimulate student engagement.",
+)
+async def generate_prompt(request: PromptRequest):
+    """
+    Generate a discussion prompt for a topic.
+    Called by Core API's generatePrompt method.
+    """
+    try:
+        intervention_service = get_intervention_service()
+
+        result = await intervention_service.generate_discussion_prompt(
+            topic=request.topic,
+            context=request.context,
+            difficulty=request.difficulty,
+        )
+
+        return PromptResponse(
+            success=result.success,
+            prompt=result.message,
+            topic=request.topic,
+            error=result.error,
+        )
+
+    except Exception as e:
+        logger.error("prompt_generation_failed", error=str(e))
+        return PromptResponse(
+            success=False,
+            prompt="",
+            topic=request.topic,
+            error=str(e),
+        )
+
+
+@router.get(
+    "/analytics/group/{group_id}",
+    response_model=GroupAnalyticsResponse,
+    tags=["Analytics"],
+    summary="Get group analytics (alias)",
+    description="Alias for /analytics/dashboard/group/{group_id} - called by Core API.",
+)
+async def get_group_analytics_alias(group_id: str):
+    """
+    Get aggregated analytics for a group's discussion.
+    This is an alias endpoint that Core API calls at /analytics/group/{group_id}.
+    Delegates to the same logic as /analytics/dashboard/group/{group_id}.
+    """
+    try:
+        orchestrator = get_orchestrator()
+        data = await orchestrator.get_group_dashboard_data(group_id)
+
+        return GroupAnalyticsResponse(
+            success=True,
+            group_id=group_id,
+            message_count=data.get("message_count", 0),
+            quality_score=data.get("quality_score"),
+            quality_breakdown=data.get("quality_breakdown"),
+            recommendation=data.get("recommendation"),
+            participants=data.get("participants", []),
+            participant_count=data.get("participant_count", 0),
+            engagement_distribution=data.get("engagement_distribution"),
+            hot_percentage=data.get("hot_percentage"),
+        )
+
+    except Exception as e:
+        logger.error("group_analytics_alias_failed", error=str(e), group_id=group_id)
+        return GroupAnalyticsResponse(
+            success=False,
+            group_id=group_id,
+            error=str(e),
+        )
+
+
+@router.get(
+    "/analytics/export",
+    tags=["Analytics"],
+    summary="Export process mining data (general)",
+)
+async def export_process_mining_general(format: Optional[str] = Query(None, description="Response format: 'csv' for raw file, default is JSON metadata")):
+    """
+    General process mining export endpoint called by Core API.
+    
+    Default (no format param): Returns JSON with success, file_url, total_events, unique_cases.
+    format=csv: Returns raw CSV file download.
+    """
+    try:
+        mongo_logger = get_mongo_logger()
+        csv_data = await mongo_logger.export_to_csv()
+
+        lines = csv_data.strip().split('\n') if csv_data.strip() else []
+        total_events = max(0, len(lines) - 1)
+        
+        unique_cases = 0
+        if total_events > 0:
+            case_ids = set()
+            for line in lines[1:]:
+                parts = line.split(',')
+                if parts:
+                    case_ids.add(parts[0])
+            unique_cases = len(case_ids)
+
+        if format == "csv":
+            filename = f"process_mining_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            logger.info("process_mining_general_export_csv", size_bytes=len(csv_data))
+            return Response(
+                content=csv_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+        logger.info("process_mining_general_export_json", total_events=total_events, unique_cases=unique_cases)
+        return JSONResponse(content={
+            "success": True,
+            "file_url": "/api/analytics/export?format=csv",
+            "total_events": total_events,
+            "unique_cases": unique_cases,
+            "message": f"Export ready: {total_events} events across {unique_cases} cases",
+        })
+
+    except Exception as e:
+        logger.error("process_mining_general_export_failed", error=str(e))
+        return JSONResponse(content={
+            "success": False,
+            "file_url": "",
+            "total_events": 0,
+            "unique_cases": 0,
+            "error": str(e),
+        })
+
+
+@router.delete(
+    "/documents/{document_id}",
+    tags=["Documents"],
+    summary="Delete a document from the vector store",
+)
+async def delete_document(
+    document_id: str,
+    collection_name: Optional[str] = Query(None, description="Collection to delete from"),
+):
+    try:
+        vector_store = get_vector_store()
+        target_collection = collection_name or "default"
+
+        await vector_store.delete_documents(
+            where={"document_id": document_id},
+            collection_name=target_collection,
+        )
+
+        logger.info("document_deleted", document_id=document_id, collection=target_collection)
+
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Document {document_id} deleted from {target_collection}",
+        })
+
+    except Exception as e:
+        logger.error("document_delete_failed", error=str(e), document_id=document_id)
+        raise HTTPException(status_code=500, detail=str(e))

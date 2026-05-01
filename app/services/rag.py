@@ -8,10 +8,12 @@ Includes Policy Agent for retrieval optimization and pedagogical guardrails.
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
+import math
 
 from app.core.logging import get_logger
 from app.core.guardrails import get_guardrails, GuardrailAction
 from app.core.config import settings
+from app.core.prompt_styles import GROUP_DISCUSSION_STYLE
 from app.services.vector_store import get_vector_store, VectorStoreService
 from app.services.llm import get_llm_service, OpenAILLMService, LLMResponse, ChatMessage
 from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
@@ -28,6 +30,9 @@ class RAGResult:
     tokens_used: int
     success: bool
     scaffolding_triggered: bool = False
+    grounding_ratio: float = 1.0
+    srl_phase: Optional[str] = None
+    srl_sub_phase: Optional[str] = None
     error: Optional[str] = None
     processing_time_ms: float = 0
 
@@ -94,13 +99,18 @@ class RAGPipeline:
         
         try:
             from app.services.embeddings import get_embedding_service
-            import numpy as np
-            
+
             embedder = get_embedding_service()
             v1 = await embedder.get_embedding(query)
             v2 = await embedder.get_embedding(self._last_query)
-            
-            similarity = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+            dot_product = sum(a * b for a, b in zip(v1, v2))
+            norm1 = math.sqrt(sum(a * a for a in v1))
+            norm2 = math.sqrt(sum(b * b for b in v2))
+            if norm1 == 0 or norm2 == 0:
+                return False
+
+            similarity = dot_product / (norm1 * norm2)
             return similarity > self._semantic_threshold
         except:
             return False
@@ -221,8 +231,9 @@ class RAGPipeline:
                     
                     llm_response = await self.llm_service.generate(
                         prompt=query,
-                        system_prompt="""Anda adalah asisten AI Kolabri.
-Berikan respons yang ramah dan membantu untuk pertanyaan atau sapaan sederhana ini."""
+                        system_prompt="""Anda adalah asisten diskusi akademik Kolabri.
+Berikan respons yang ramah, membantu, dan relevan untuk pertanyaan atau sapaan sederhana dalam konteks pembelajaran.
+""" + GROUP_DISCUSSION_STYLE
                     )
                     
                     processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -265,9 +276,10 @@ Berikan respons yang ramah dan membantu untuk pertanyaan atau sapaan sederhana i
                         # Generate response without context
                         llm_response = await self.llm_service.generate(
                             prompt=query,
-                            system_prompt="""Anda adalah asisten AI Kolabri.
+                            system_prompt="""Anda adalah asisten diskusi akademik Kolabri.
 Tidak ada dokumen relevan yang ditemukan untuk pertanyaan ini.
-Berikan jawaban umum yang membantu dan sarankan untuk mengunggah dokumen yang relevan."""
+Berikan jawaban umum yang tetap membantu, jelaskan keterbatasannya dengan jujur, dan bila relevan sarankan untuk mengunggah dokumen yang sesuai.
+""" + GROUP_DISCUSSION_STYLE
                         )
                         
                         processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -295,7 +307,32 @@ Berikan jawaban umum yang membantu dan sarankan untuk mengunggah dokumen yang re
                     fading_level=fading_level
                 )
                 
-                # [NEW] Step 4: Output Guardrails (Grounding & Pedagogy)
+                # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
+                from app.services.grounding_verifier import get_grounding_verifier
+                grounding_verifier = get_grounding_verifier()
+                grounding_result = grounding_verifier.verify_grounding(
+                    response=llm_response.content,
+                    documents=[{"content": c.get("text", c.get("content", ""))} for c in contexts],
+                    threshold=0.7
+                )
+
+                if not grounding_result.is_grounded:
+                    logger.warning(
+                        "grounding_check_failed",
+                        ratio=grounding_result.grounding_ratio,
+                        ungrounded=grounding_result.ungrounded_claims[:2]
+                    )
+                    return RAGResult(
+                        answer="Jawaban tidak dapat diberikan tanpa berspekulasi di luar materi yang tersedia.",
+                        sources=self._extract_sources(search_results) if search_results else [],
+                        query=query,
+                        tokens_used=llm_response.tokens_used,
+                        success=True,
+                        scaffolding_triggered=True,
+                        processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000
+                    )
+
+                # Step 4: Output Guardrails (Pedagogy)
                 output_check = self.guardrails.check_output(
                     response=llm_response.content,
                     original_query=query,
@@ -476,6 +513,40 @@ Berikan jawaban umum yang membantu dan sarankan untuk mengunggah dokumen yang re
         contexts.sort(key=lambda x: x.get("score", 0), reverse=True)
         
         return contexts
+
+    def _build_multi_source_context(self, docs: List[Dict[str, Any]]) -> str:
+        """Build context with explicit source attribution for multi-hop reasoning."""
+        parts = []
+        for i, doc in enumerate(docs, 1):
+            source = doc.get("metadata", {}).get("source", f"Dokumen {i}")
+            page = doc.get("metadata", {}).get("page", "")
+            content = doc.get("content", doc.get("page_content", ""))
+            header = f"[Sumber {i}: {source}"
+            if page:
+                header += f", hal. {page}"
+            header += "]"
+            parts.append(f"{header}\n{content}")
+        return "\n\n---\n\n".join(parts)
+
+    def _build_rag_token_prompt(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
+        """Build a prompt that instructs the LLM to synthesize across multiple sources."""
+        context = self._build_multi_source_context(context_docs)
+        return f"""Kamu adalah asisten pembelajaran yang membantu mahasiswa memahami materi.
+
+INSTRUKSI PENTING:
+- Jawab berdasarkan SEMUA sumber dokumen yang diberikan
+- Sintesiskan informasi dari berbagai sumber (multi-hop reasoning)
+- Jika jawaban memerlukan informasi dari beberapa dokumen, gabungkan secara koheren
+- Jangan menjawab di luar konteks dokumen yang tersedia
+- Gunakan pendekatan Socratic: bimbing mahasiswa untuk berpikir, bukan memberikan jawaban langsung
+
+KONTEKS DOKUMEN:
+{context}
+
+PERTANYAAN MAHASISWA:
+{query}
+
+JAWABAN (sintesis dari semua sumber yang relevan):"""
     
     def _extract_sources(
         self,

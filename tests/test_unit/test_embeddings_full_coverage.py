@@ -1,200 +1,121 @@
-"""
-Tests for Embeddings Service - Full Coverage
-"""
-import pytest
+"""Additional coverage tests for Gemini embedding service."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.services.embeddings import (
-    OpenAIEmbeddingService,
-    get_embedding_service,
-)
+
+import pytest
+
+from app.services import embeddings
+from app.services.embeddings import GeminiEmbeddingService, get_embedding_service
 
 
-class TestOpenAIEmbeddingServiceFull:
-    """Test OpenAIEmbeddingService full coverage."""
-    
-    @pytest.fixture
-    def mock_client(self):
-        """Create mock OpenAI client."""
-        mock = MagicMock()
-        mock.embeddings.create = AsyncMock(return_value=MagicMock(
-            data=[MagicMock(embedding=[0.1, 0.2, 0.3])]
-        ))
-        return mock
-    
+def _mock_response(payload):
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json.return_value = payload
+    return response
+
+
+class TestGeminiEmbeddingServiceFull:
     def test_initialize_already_initialized(self):
-        """Test initialize when already initialized."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test_key'
-            mock_settings.OPENAI_BASE_URL = 'http://test.com'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test-model'
-            
-            service = OpenAIEmbeddingService()
-            service._initialized = True
-            
-            # Should not re-initialize
-            service.initialize()
-            
-            assert service._initialized is True
-    
+        service = GeminiEmbeddingService()
+        existing_client = MagicMock()
+        service._initialized = True
+        service._client = existing_client
+
+        service.initialize()
+
+        assert service._client is existing_client
+
     @pytest.mark.asyncio
     async def test_embed_text_auto_init(self):
-        """Test embed_text auto-initializes."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service._initialized = False
-            
-            # First call initialize
-            service.initialize()
-            
-            # Then mock the client
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(data=[MagicMock(embedding=[0.1, 0.2])])
-            )
-            
-            result = await service.embed_text("test")
-            
-            assert len(result) == 2
-    
+        service = GeminiEmbeddingService()
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=_mock_response({"embedding": {"values": [0.1, 0.2]}}))
+
+        with patch("app.services.embeddings.httpx.AsyncClient", return_value=mock_client):
+            with patch.object(embeddings.settings, "GEMINI_API_KEY", "gemini-test-key"), patch.object(
+                embeddings.settings, "GOOGLE_API_KEY", ""
+            ), patch.object(
+                embeddings.settings,
+                "GEMINI_EMBEDDING_MODEL",
+                "models/text-embedding-004",
+            ):
+                result = await service.embed_text("test")
+
+        assert result == [0.1, 0.2]
+        assert service._initialized is True
+
     @pytest.mark.asyncio
     async def test_embed_texts_auto_init(self):
-        """Test embed_texts auto-initializes."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service.initialize()
-            
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(data=[MagicMock(embedding=[0.1, 0.2])])
-            )
-            
-            result = await service.embed_texts(["test"])
-            
-            assert len(result) == 1
-    
+        service = GeminiEmbeddingService()
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(
+            return_value=_mock_response({"embeddings": [{"values": [0.1, 0.2]}]})
+        )
+
+        with patch("app.services.embeddings.httpx.AsyncClient", return_value=mock_client):
+            with patch.object(embeddings.settings, "GEMINI_API_KEY", "gemini-test-key"), patch.object(
+                embeddings.settings, "GOOGLE_API_KEY", ""
+            ), patch.object(
+                embeddings.settings,
+                "GEMINI_EMBEDDING_MODEL",
+                "models/text-embedding-004",
+            ):
+                result = await service.embed_texts(["test"])
+
+        assert result == [[0.1, 0.2]]
+
     @pytest.mark.asyncio
     async def test_embed_query_auto_init(self):
-        """Test embed_query auto-initializes."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service.initialize()
-            
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(data=[MagicMock(embedding=[0.1, 0.2])])
-            )
-            
-            result = await service.embed_query("query")
-            
-            assert len(result) == 2
-    
-    @pytest.mark.asyncio
-    async def test_embed_texts(self):
-        """Test embed_texts method."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service.initialize()
-            
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(
-                    data=[
-                        MagicMock(embedding=[0.1, 0.2]),
-                        MagicMock(embedding=[0.3, 0.4]),
-                    ]
-                )
-            )
-            
-            result = await service.embed_texts(["text1", "text2"])
-            
-            assert len(result) == 2
-    
-    @pytest.mark.asyncio
-    async def test_embed_query(self):
-        """Test embed_query method."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service.initialize()
-            
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(data=[MagicMock(embedding=[0.5, 0.6])])
-            )
-            
-            result = await service.embed_query("query test")
-            
-            assert len(result) == 2
-    
+        service = GeminiEmbeddingService()
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=_mock_response({"embedding": {"values": [0.5, 0.6]}}))
+
+        with patch("app.services.embeddings.httpx.AsyncClient", return_value=mock_client):
+            with patch.object(embeddings.settings, "GEMINI_API_KEY", "gemini-test-key"), patch.object(
+                embeddings.settings, "GOOGLE_API_KEY", ""
+            ), patch.object(
+                embeddings.settings,
+                "GEMINI_EMBEDDING_MODEL",
+                "models/text-embedding-004",
+            ):
+                result = await service.embed_query("query")
+
+        assert result == [0.5, 0.6]
+
     @pytest.mark.asyncio
     async def test_get_embedding_alias(self):
-        """Test get_embedding is alias for embed_text."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = OpenAIEmbeddingService()
-            service.initialize()
-            
-            service._client.embeddings.create = AsyncMock(
-                return_value=MagicMock(data=[MagicMock(embedding=[0.7, 0.8])])
-            )
-            
+        service = GeminiEmbeddingService()
+
+        with patch.object(service, "embed_text", new=AsyncMock(return_value=[0.7, 0.8])) as mock_embed:
             result = await service.get_embedding("test")
-            
-            assert len(result) == 2
-    
+
+        assert result == [0.7, 0.8]
+        mock_embed.assert_awaited_once_with("test")
+
     def test_initialize_no_api_key(self):
-        """Test initialize without API key."""
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = ''
-            
-            service = OpenAIEmbeddingService()
-            
+        with patch.object(embeddings.settings, "GEMINI_API_KEY", ""), patch.object(
+            embeddings.settings, "GOOGLE_API_KEY", ""
+        ):
+            service = GeminiEmbeddingService()
+
             with pytest.raises(ValueError):
                 service.initialize()
 
 
 class TestGetEmbeddingServiceFull:
-    """Test get_embedding_service singleton full coverage."""
-    
     def test_singleton_creates_new_instance(self):
-        """Test singleton creates new instance when None."""
-        from app.services import embeddings
         embeddings._embedding_service = None
-        
-        with patch('app.services.embeddings.settings') as mock_settings:
-            mock_settings.OPENAI_API_KEY = 'test'
-            mock_settings.OPENAI_BASE_URL = 'http://test'
-            mock_settings.OPENAI_EMBEDDING_MODEL = 'test'
-            
-            service = get_embedding_service()
-            
-            assert service is not None
-            assert isinstance(service, OpenAIEmbeddingService)
-    
+
+        service = get_embedding_service()
+
+        assert service is not None
+        assert isinstance(service, GeminiEmbeddingService)
+
     def test_singleton_returns_existing(self):
-        """Test singleton returns existing instance."""
-        from app.services import embeddings
-        
         existing = MagicMock()
         embeddings._embedding_service = existing
-        
+
         result = get_embedding_service()
-        
+
         assert result is existing

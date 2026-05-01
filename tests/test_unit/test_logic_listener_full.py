@@ -250,9 +250,8 @@ class TestLogicListener:
     
     def test_calculate_cosine_similarity(self, logic_listener):
         """Test _calculate_cosine_similarity method."""
-        import numpy as np
-        vec1 = np.array([1.0, 0.0, 0.0])
-        vec2 = np.array([1.0, 0.0, 0.0])
+        vec1 = [1.0, 0.0, 0.0]
+        vec2 = [1.0, 0.0, 0.0]
         
         result = logic_listener._calculate_cosine_similarity(vec1, vec2)
         
@@ -260,9 +259,8 @@ class TestLogicListener:
     
     def test_calculate_cosine_similarity_orthogonal(self, logic_listener):
         """Test _calculate_cosine_similarity with orthogonal vectors."""
-        import numpy as np
-        vec1 = np.array([1.0, 0.0, 0.0])
-        vec2 = np.array([0.0, 1.0, 0.0])
+        vec1 = [1.0, 0.0, 0.0]
+        vec2 = [0.0, 1.0, 0.0]
         
         result = logic_listener._calculate_cosine_similarity(vec1, vec2)
         
@@ -270,9 +268,8 @@ class TestLogicListener:
     
     def test_calculate_cosine_similarity_zero_norm(self, logic_listener):
         """Test _calculate_cosine_similarity with zero norm."""
-        import numpy as np
-        vec1 = np.array([0.0, 0.0, 0.0])
-        vec2 = np.array([1.0, 0.0, 0.0])
+        vec1 = [0.0, 0.0, 0.0]
+        vec2 = [1.0, 0.0, 0.0]
         
         result = logic_listener._calculate_cosine_similarity(vec1, vec2)
         

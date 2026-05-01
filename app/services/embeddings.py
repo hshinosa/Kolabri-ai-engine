@@ -1,12 +1,5 @@
-"""
-Embedding Service
-=================
-Generates vector embeddings using OpenAI Compatible API (GLM-4.7).
-Supports single text, batch texts, and optimized query embedding.
-"""
-
 from typing import List
-from openai import AsyncOpenAI
+import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
@@ -14,113 +7,100 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+GEMINI_EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/{model}:embedContent"
+GEMINI_BATCH_URL = "https://generativelanguage.googleapis.com/v1beta/{model}:batchEmbedContents"
 
-class OpenAIEmbeddingService:
-    """Service for generating embeddings using OpenAI Compatible API."""
-    
+
+class GeminiEmbeddingService:
     def __init__(self):
-        """Initialize OpenAI embedding service."""
         self._initialized = False
-        self._client = None
-        self._model = None
-    
+        self._api_key: str | None = None
+        self._model: str | None = None
+        self._client: httpx.AsyncClient | None = None
+
     def initialize(self) -> None:
-        """Initialize the OpenAI API client."""
         if self._initialized:
             return
-            
-        if not settings.OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY is required")
-        
-        self._client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL
-        )
-        self._model = settings.OPENAI_EMBEDDING_MODEL
+
+        api_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY is required for embeddings")
+
+        self._api_key = api_key
+        self._model = settings.GEMINI_EMBEDDING_MODEL
+        self._client = httpx.AsyncClient(timeout=30.0)
         self._initialized = True
-        logger.info("OpenAI embedding service initialized", model=self._model, base_url=settings.OPENAI_BASE_URL)
-    
+        logger.info("gemini_embedding_initialized", model=self._model)
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            self.initialize()
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
     async def embed_text(self, text: str) -> List[float]:
-        """
-        Generate embedding for a single text.
-        
-        Args:
-            text: Text to embed
-            
-        Returns:
-            List of embedding values
-        """
-        if not self._initialized:
-            self.initialize()
-        
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text
+        self._ensure_initialized()
+
+        url = GEMINI_EMBED_URL.format(model=self._model)
+        resp = await self._client.post(
+            url,
+            params={"key": self._api_key},
+            json={"model": self._model, "content": {"parts": [{"text": text}]}},
         )
-        return response.data[0].embedding
-    
+        resp.raise_for_status()
+        return resp.json()["embedding"]["values"]
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """
-        Generate embeddings for multiple texts.
-        
-        Args:
-            texts: List of texts to embed
-            
-        Returns:
-            List of embedding vectors
-        """
-        if not self._initialized:
-            self.initialize()
-        
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts
+        self._ensure_initialized()
+
+        url = GEMINI_BATCH_URL.format(model=self._model)
+        requests = [
+            {"model": self._model, "content": {"parts": [{"text": t}]}}
+            for t in texts
+        ]
+        resp = await self._client.post(
+            url,
+            params={"key": self._api_key},
+            json={"requests": requests},
         )
-        return [item.embedding for item in response.data]
-    
+        resp.raise_for_status()
+        return [item["values"] for item in resp.json()["embeddings"]]
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
     async def embed_query(self, query: str) -> List[float]:
-        """
-        Generate embedding for a query (optimized for retrieval).
-        
-        Args:
-            query: Query text to embed
-            
-        Returns:
-            Query embedding vector
-        """
-        if not self._initialized:
-            self.initialize()
-        
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=query
+        self._ensure_initialized()
+
+        url = GEMINI_EMBED_URL.format(model=self._model)
+        resp = await self._client.post(
+            url,
+            params={"key": self._api_key},
+            json={
+                "model": self._model,
+                "content": {"parts": [{"text": query}]},
+                "taskType": "RETRIEVAL_QUERY",
+            },
         )
-        return response.data[0].embedding
+        resp.raise_for_status()
+        return resp.json()["embedding"]["values"]
 
     async def get_embedding(self, text: str) -> List[float]:
-        """Alias for embed_text for compatibility with existing code."""
         return await self.embed_text(text)
 
 
-# Singleton instance
-_embedding_service: OpenAIEmbeddingService = None
+_embedding_service: GeminiEmbeddingService | None = None
 
 
-def get_embedding_service() -> OpenAIEmbeddingService:
-    """Get or create the embedding service singleton."""
+def get_embedding_service() -> GeminiEmbeddingService:
     global _embedding_service
     if _embedding_service is None:
-        _embedding_service = OpenAIEmbeddingService()
+        _embedding_service = GeminiEmbeddingService()
     return _embedding_service

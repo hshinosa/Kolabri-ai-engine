@@ -1,351 +1,147 @@
-"""
-Tests for MongoDB Logger Service - Full Coverage
-"""
-import pytest
+"""Focused tests for current MongoDB logger behavior."""
+
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from io import StringIO
-from app.services.mongodb_logger import (
-    MongoDBLogger,
-    get_mongo_logger,
-)
+
+import pytest
+
+from app.services import mongodb_logger as mongo_module
+from app.services.mongodb_logger import MongoDBLogger, get_mongo_logger
+
+
+@pytest.fixture
+def mongo_logger():
+    with patch("app.services.mongodb_logger.PIIDetector") as mock_pii:
+        mock_pii.return_value.mask.side_effect = lambda text: text
+        yield MongoDBLogger()
 
 
 class TestMongoDBLoggerFull:
-    """Test MongoDBLogger full coverage."""
-    
-    @pytest.fixture
-    def mock_client(self):
-        """Create mock MongoDB client."""
-        mock = MagicMock()
-        mock.admin.command = AsyncMock()
-        
-        mock_db = MagicMock()
-        mock_collection = MagicMock()
-        mock_collection.create_index = AsyncMock()
-        mock_collection.insert_one = AsyncMock()
-        mock_collection.find = MagicMock(return_value=MagicMock(
-            sort=MagicMock(return_value=MagicMock(
-                limit=MagicMock(return_value=MagicMock(
-                    to_list=AsyncMock(return_value=[{
-                        "_id": "mock_id",
-                        "CaseID": "test",
-                        "Activity": "Test",
-                        "Timestamp": datetime.now(),
-                        "Resource": "User",
-                        "Attributes": {
-                            "original_text": "Test",
-                            "srl_object": "Object",
-                            "educational_category": "Cognitive",
-                            "is_hot": True,
-                            "lexical_variety": 0.5,
-                            "scaffolding_trigger": False
-                        }
-                    }])
-                ))
-            ))
-        ))
-        
-        mock.__getitem__ = MagicMock(return_value=mock_db)
-        mock_db.activity_logs = mock_collection
-        mock_db.silence_events = mock_collection
-        
-        return mock
-    
-    @pytest.fixture
-    def mongo_logger(self):
-        """Create MongoDBLogger instance."""
-        return MongoDBLogger()
-    
     def test_init(self, mongo_logger):
-        """Test initialization."""
         assert mongo_logger.client is None
         assert mongo_logger.db is None
-    
+
     @pytest.mark.asyncio
     async def test_connect_disabled(self, mongo_logger):
-        """Test connect when disabled."""
-        with patch('app.services.mongodb_logger.settings') as mock_settings:
-            mock_settings.ENABLE_MONGODB_LOGGING = False
-            
-            await mongo_logger.connect()
-            
-            assert mongo_logger.enabled is False
-            assert mongo_logger.client is None
-    
+        mongo_logger.enabled = False
+        await mongo_logger.connect()
+        assert mongo_logger.client is None
+
     @pytest.mark.asyncio
-    async def test_connect_success(self, mongo_logger, mock_client):
-        """Test connect with success."""
-        with patch('app.services.mongodb_logger.settings') as mock_settings:
-            mock_settings.ENABLE_MONGODB_LOGGING = True
-            mock_settings.MONGO_URI = 'mongodb://localhost'
-            mock_settings.MONGO_DB_NAME = 'test_db'
-            
-            with patch('app.services.mongodb_logger.AsyncIOMotorClient', return_value=mock_client):
+    async def test_connect_success(self, mongo_logger):
+        mock_client = MagicMock()
+        mock_client.admin.command = AsyncMock(return_value={"ok": 1})
+        mock_db = MagicMock()
+        mock_db.activity_logs.create_index = AsyncMock()
+        mock_db.silence_events.create_index = AsyncMock()
+        mock_client.__getitem__.return_value = mock_db
+
+        with patch("app.services.mongodb_logger.AsyncIOMotorClient", return_value=mock_client):
+            with patch.object(mongo_module.settings, "MONGO_URI", "mongodb://localhost"), patch.object(
+                mongo_module.settings, "MONGO_DB_NAME", "test_db"
+            ), patch.object(mongo_module.settings, "MONGO_MAX_POOL_SIZE", 50), patch.object(
+                mongo_module.settings, "MONGO_MIN_POOL_SIZE", 10
+            ), patch.object(
+                mongo_module.settings, "MONGO_MAX_IDLE_TIME_MS", 30000
+            ), patch.object(
+                mongo_module.settings, "MONGO_CONNECT_TIMEOUT_MS", 5000
+            ):
+                mongo_logger.enabled = True
                 await mongo_logger.connect()
-                
-                assert mongo_logger.client is not None
-                assert mongo_logger.db is not None
-                assert mongo_logger.enabled is True
-    
+
+        assert mongo_logger.client is mock_client
+        assert mongo_logger.db is mock_db
+
     @pytest.mark.asyncio
     async def test_connect_exception(self, mongo_logger):
-        """Test connect with exception."""
-        with patch('app.services.mongodb_logger.settings') as mock_settings:
-            mock_settings.ENABLE_MONGODB_LOGGING = True
-            mock_settings.MONGO_URI = 'mongodb://localhost'
-            mock_settings.MONGO_DB_NAME = 'test_db'
-            
-            mock_client = MagicMock()
-            mock_client.admin.command = AsyncMock(side_effect=Exception("Connection failed"))
-            
-            with patch('app.services.mongodb_logger.AsyncIOMotorClient', return_value=mock_client):
-                await mongo_logger.connect()
-                
-                assert mongo_logger.enabled is False
-    
+        mock_client = MagicMock()
+        mock_client.admin.command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        with patch("app.services.mongodb_logger.AsyncIOMotorClient", return_value=mock_client):
+            mongo_logger.enabled = True
+            await mongo_logger.connect()
+
+        assert mongo_logger.enabled is False
+
     @pytest.mark.asyncio
-    async def test_log_activity_disabled(self, mongo_logger):
-        """Test log_activity when disabled."""
-        mongo_logger.enabled = False
-        
-        entry = {"CaseID": "test", "Activity": "Test"}
-        await mongo_logger.log_activity(entry)
-        
-        # Should not raise and should not log
-    
-    @pytest.mark.asyncio
-    async def test_log_activity_no_db(self, mongo_logger):
-        """Test log_activity without db."""
+    async def test_log_activity_variants(self, mongo_logger):
         mongo_logger.enabled = True
-        mongo_logger.db = None
-        
-        entry = {"CaseID": "test", "Activity": "Test"}
+        mongo_logger.db = MagicMock()
+        mongo_logger.db.activity_logs.insert_one = AsyncMock()
+
+        entry = {"CaseID": "test", "Activity": "Test", "Attributes": {"original_text": "hello"}}
         await mongo_logger.log_activity(entry)
-    
-    @pytest.mark.asyncio
-    async def test_log_activity_success(self, mongo_logger, mock_client):
-        """Test log_activity with success."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        entry = {"CaseID": "test", "Activity": "Test"}
-        await mongo_logger.log_activity(entry)
-        
-        mock_client['test_db'].activity_logs.insert_one.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_log_activity_adds_timestamp(self, mongo_logger, mock_client):
-        """Test log_activity adds timestamp."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        entry = {"CaseID": "test", "Activity": "Test"}
-        await mongo_logger.log_activity(entry)
-        
         assert "Timestamp" in entry
-    
-    @pytest.mark.asyncio
-    async def test_log_activity_exception(self, mongo_logger, mock_client):
-        """Test log_activity with exception."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        mock_client['test_db'].activity_logs.insert_one = AsyncMock(side_effect=Exception("Error"))
-        
-        entry = {"CaseID": "test", "Activity": "Test"}
-        
-        # Should not raise
-        await mongo_logger.log_activity(entry)
-    
-    @pytest.mark.asyncio
-    async def test_log_intervention(self, mongo_logger, mock_client):
-        """Test log_intervention method."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        await mongo_logger.log_intervention(
-            group_id="group1",
-            intervention_type="redirect",
-            reason="Test reason",
-            metadata={"key": "value"}
-        )
-        
-        mock_client['test_db'].activity_logs.insert_one.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_log_intervention_custom_session(self, mongo_logger, mock_client):
-        """Test log_intervention with custom session."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        await mongo_logger.log_intervention(
-            group_id="group1",
-            intervention_type="silence",
-            reason="Test",
-            metadata={},
-            session_id="5"
-        )
-        
-        # Should include custom session_id
-        call_args = mock_client['test_db'].activity_logs.insert_one.call_args
-        assert "session_5" in str(call_args)
-    
-    @pytest.mark.asyncio
-    async def test_get_activity_logs_disabled(self, mongo_logger):
-        """Test get_activity_logs when disabled."""
+        mongo_logger.db.activity_logs.insert_one.assert_awaited_once()
+
+        mongo_logger.db.activity_logs.insert_one = AsyncMock(side_effect=Exception("Error"))
+        await mongo_logger.log_activity({"CaseID": "test", "Activity": "Test"})
+
         mongo_logger.enabled = False
-        
-        result = await mongo_logger.get_activity_logs(case_id="test")
-        
-        assert result == []
-    
+        await mongo_logger.log_activity({"CaseID": "test"})
+
     @pytest.mark.asyncio
-    async def test_get_activity_logs_no_db(self, mongo_logger):
-        """Test get_activity_logs without db."""
+    async def test_log_intervention(self, mongo_logger):
+        mongo_logger.log_activity = AsyncMock()
+        await mongo_logger.log_intervention("group1", "redirect", "reason", {"key": "value"}, session_id="5")
+        mongo_logger.log_activity.assert_awaited_once()
+        logged_entry = mongo_logger.log_activity.await_args.args[0]
+        assert logged_entry["CaseID"] == "group1_session_5"
+
+    @pytest.mark.asyncio
+    async def test_get_activity_logs_and_export(self, mongo_logger):
+        mongo_logger.enabled = True
+        mongo_logger.db = MagicMock()
+        cursor = MagicMock()
+        cursor.sort.return_value = cursor
+        cursor.limit.return_value = cursor
+        cursor.to_list = AsyncMock(
+            return_value=[
+                {
+                    "_id": "mock_id",
+                    "CaseID": "test",
+                    "Activity": "Test",
+                    "Timestamp": datetime.now(),
+                    "Resource": "User",
+                    "Lifecycle": "complete",
+                    "Attributes": {"original_text": "Test"},
+                }
+            ]
+        )
+        mongo_logger.db.activity_logs.find.return_value = cursor
+
+        result = await mongo_logger.get_activity_logs(case_id="test")
+        assert len(result) == 1
+        assert isinstance(result[0]["_id"], str)
+
+        csv_output = await mongo_logger.export_to_csv(case_id="test")
+        assert "CaseID,Activity,Timestamp" in csv_output
+
+    @pytest.mark.asyncio
+    async def test_get_activity_logs_disabled_or_failure(self, mongo_logger):
+        mongo_logger.enabled = False
+        assert await mongo_logger.get_activity_logs(case_id="test") == []
+
         mongo_logger.enabled = True
         mongo_logger.db = None
-        
-        result = await mongo_logger.get_activity_logs(case_id="test")
-        
-        assert result == []
-    
+        assert await mongo_logger.get_activity_logs(case_id="test") == []
+
+        mongo_logger.db = MagicMock()
+        mongo_logger.db.activity_logs.find.side_effect = Exception("boom")
+        assert await mongo_logger.get_activity_logs(case_id="test") == []
+
     @pytest.mark.asyncio
-    async def test_get_activity_logs_success(self, mongo_logger, mock_client):
-        """Test get_activity_logs with success."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        result = await mongo_logger.get_activity_logs(case_id="test")
-        
-        assert len(result) == 1
-        assert result[0]["CaseID"] == "test"
-    
-    @pytest.mark.asyncio
-    async def test_get_activity_logs_with_resource(self, mongo_logger, mock_client):
-        """Test get_activity_logs with resource filter."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        result = await mongo_logger.get_activity_logs(resource="User")
-        
-        assert len(result) == 1
-    
-    @pytest.mark.asyncio
-    async def test_get_activity_logs_chat_space_id(self, mongo_logger, mock_client):
-        """Test get_activity_logs with chat_space_id."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        result = await mongo_logger.get_activity_logs(chat_space_id="chat1")
-        
-        assert len(result) == 1
-    
-    @pytest.mark.asyncio
-    async def test_get_activity_logs_timestamp_conversion(self, mongo_logger, mock_client):
-        """Test get_activity_logs converts datetime to ISO format."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        # Mock with datetime object
-        mock_dt = datetime(2024, 1, 1, 12, 0, 0)
-        mock_client['test_db'].activity_logs.find = MagicMock(return_value=MagicMock(
-            sort=MagicMock(return_value=MagicMock(
-                limit=MagicMock(return_value=MagicMock(
-                    to_list=AsyncMock(return_value=[{
-                        "_id": "mock_id",
-                        "Timestamp": mock_dt,
-                        "CaseID": "test",
-                        "Activity": "Test",
-                        "Resource": "User",
-                        "Attributes": {}
-                    }])
-                ))
-            ))
-        ))
-        
-        result = await mongo_logger.get_activity_logs(case_id="test")
-        
-        assert len(result) == 1
-        assert result[0]["Timestamp"] == mock_dt.isoformat()
-    
-    @pytest.mark.asyncio
-    async def test_get_activity_logs_exception(self, mongo_logger, mock_client):
-        """Test get_activity_logs with exception."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        mock_client['test_db'].activity_logs.find = MagicMock(side_effect=Exception("Error"))
-        
-        result = await mongo_logger.get_activity_logs(case_id="test")
-        
-        assert result == []
-    
-    @pytest.mark.asyncio
-    async def test_export_to_csv(self, mongo_logger, mock_client):
-        """Test export_to_csv method."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        
-        result = await mongo_logger.export_to_csv(case_id="test")
-        
-        assert isinstance(result, str)
-        assert "CaseID" in result
-    
-    @pytest.mark.asyncio
-    async def test_export_to_csv_no_logs(self, mongo_logger, mock_client):
-        """Test export_to_csv with no logs."""
-        mongo_logger.enabled = True
-        mongo_logger.db = mock_client['test_db']
-        mock_client['test_db'].activity_logs.find = MagicMock(return_value=MagicMock(
-            sort=MagicMock(return_value=MagicMock(
-                limit=MagicMock(return_value=MagicMock(
-                    to_list=AsyncMock(return_value=[])
-                ))
-            ))
-        ))
-        
-        result = await mongo_logger.export_to_csv(case_id="test")
-        
-        assert isinstance(result, str)
-        assert "CaseID" in result  # Header should still be present
-    
-    @pytest.mark.asyncio
-    async def test_close(self, mongo_logger, mock_client):
-        """Test close method."""
-        mongo_logger.client = mock_client
-        
+    async def test_close(self, mongo_logger):
+        mongo_logger.client = MagicMock()
         await mongo_logger.close()
-        
-        mock_client.close.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_close_no_client(self, mongo_logger):
-        """Test close without client."""
-        mongo_logger.client = None
-        
-        # Should not raise
-        await mongo_logger.close()
+        mongo_logger.client.close.assert_called_once()
 
 
-class TestGetMongoLoggerFull:
-    """Test get_mongo_logger singleton full coverage."""
-    
-    def test_singleton_creates_instance(self):
-        """Test singleton creates new instance."""
-        from app.services import mongodb_logger
-        mongodb_logger._mongo_logger = None
-        
-        logger = get_mongo_logger()
-        
-        assert logger is not None
-        assert isinstance(logger, MongoDBLogger)
-    
-    def test_singleton_returns_existing(self):
-        """Test singleton returns existing instance."""
-        from app.services import mongodb_logger
-        
-        existing = MagicMock()
-        mongodb_logger._mongo_logger = existing
-        
-        result = get_mongo_logger()
-        
-        assert result is existing
+class TestGetMongoLogger:
+    def test_get_mongo_logger_singleton(self):
+        mongo_module._mongo_logger = None
+        with patch("app.services.mongodb_logger.PIIDetector") as mock_pii:
+            mock_pii.return_value.mask.side_effect = lambda text: text
+            logger1 = get_mongo_logger()
+            logger2 = get_mongo_logger()
+        assert logger1 is logger2

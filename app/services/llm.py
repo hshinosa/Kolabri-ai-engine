@@ -5,6 +5,7 @@ from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.prompt_styles import GROUP_DISCUSSION_STYLE, GROUP_INTERVENTION_STYLE, SUMMARY_STYLE
 
 logger = get_logger(__name__)
 
@@ -29,9 +30,9 @@ class LLMResponse:
 class OpenAILLMService:
     SYSTEM_PROMPTS = {
         'default': 'Anda adalah asisten AI Kolabri yang membantu mahasiswa.',
-        'rag': 'Anda adalah asisten RAG.',
-        'intervention': 'Anda fasilitator diskusi.',
-        'summary': 'Anda ahli ringkasan.'
+        'rag': 'Anda adalah asisten diskusi akademik Kolabri. ' + GROUP_DISCUSSION_STYLE,
+        'intervention': 'Anda adalah fasilitator diskusi akademik Kolabri. ' + GROUP_INTERVENTION_STYLE,
+        'summary': 'Anda adalah peringkas diskusi akademik Kolabri. ' + SUMMARY_STYLE
     }
     
     def __init__(self):

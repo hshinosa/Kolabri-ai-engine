@@ -18,6 +18,7 @@ from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.prompt_styles import GROUP_DISCUSSION_STYLE, GROUP_INTERVENTION_STYLE, SUMMARY_STYLE
 import httpx
 
 logger = get_logger(__name__)
@@ -59,9 +60,9 @@ class OptimizedLLMService:
     
     SYSTEM_PROMPTS = {
         'default': 'Anda adalah asisten AI Kolabri yang membantu mahasiswa.',
-        'rag': 'Anda adalah asisten RAG.',
-        'intervention': 'Anda fasilitator diskusi.',
-        'summary': 'Anda ahli ringkasan.'
+        'rag': 'Anda adalah asisten diskusi akademik Kolabri. Bantu mahasiswa memahami materi dengan jawaban yang akurat, terstruktur, dan mendorong pemikiran kritis. ' + GROUP_DISCUSSION_STYLE,
+        'intervention': 'Anda adalah fasilitator diskusi akademik Kolabri. ' + GROUP_INTERVENTION_STYLE,
+        'summary': 'Anda adalah peringkas diskusi akademik Kolabri. ' + SUMMARY_STYLE,
     }
     
     def __init__(self):

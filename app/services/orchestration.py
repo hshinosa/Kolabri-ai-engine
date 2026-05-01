@@ -94,7 +94,10 @@ class Orchestrator:
                 "Resource": "Kolabri_Bot", "Lifecycle": "complete",
                 "Attributes": {
                     "original_text": bot_reply, "srl_object": srl_obj, "educational_category": "Instructional",
-                    "scaffolding_trigger": rag_result.scaffolding_triggered, "action_taken": "FETCH" if rag_result.sources else "NO_FETCH"
+                    "scaffolding_trigger": rag_result.scaffolding_triggered, "action_taken": "FETCH" if rag_result.sources else "NO_FETCH",
+                    "grounding_ratio": getattr(rag_result, "grounding_ratio", None),
+                    "srl_phase": getattr(rag_result, "srl_phase", None),
+                    "srl_sub_phase": getattr(rag_result, "srl_sub_phase", None)
                 }
             })
             

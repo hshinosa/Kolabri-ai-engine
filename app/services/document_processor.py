@@ -32,13 +32,8 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 # Multimodal / Vision
-try:
-    import google.generativeai as genai
-
-    VISION_AVAILABLE = True
-except ImportError:
-    genai = None
-    VISION_AVAILABLE = False
+VISION_AVAILABLE = False
+genai = None
 
 # PDF Processing
 from pypdf import PdfReader
@@ -169,6 +164,7 @@ class DocumentProcessor:
             VISION_AVAILABLE and settings.ENABLE_MULTIMODAL_PROCESSING
         )
         self._ocr_engine = None
+        self._vision_client = None
         self._vision_model = None
 
         # Idempotency: Track processed content hashes
@@ -177,10 +173,18 @@ class DocumentProcessor:
         if self.ocr_available:
             self._initialize_ocr_engine()
 
-        if self.vision_available and settings.GEMINI_API_KEY:
+        if self.vision_available and getattr(settings, "GEMINI_API_KEY", "") and genai:
             genai.configure(api_key=settings.GEMINI_API_KEY)
             self._vision_model = genai.GenerativeModel(settings.GEMINI_VISION_MODEL)
             logger.info("Gemini Vision initialized", model=settings.GEMINI_VISION_MODEL)
+        elif self.vision_available and settings.OPENAI_API_KEY:
+            from openai import OpenAI
+
+            self._vision_client = OpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                base_url=settings.OPENAI_BASE_URL,
+            )
+            logger.info("OpenAI Vision initialized", model=settings.GEMINI_VISION_MODEL)
         elif settings.ENABLE_OCR:
             if OCR_IMPORT_ERROR:
                 logger.warning(
@@ -1042,7 +1046,7 @@ class DocumentProcessor:
 
     async def _generate_image_caption(self, image: Image.Image) -> str:
         """Generate description for an image using Gemini Vision."""
-        if not self._vision_model:
+        if not self._vision_model and not self._vision_client:
             return ""
 
         try:
@@ -1058,27 +1062,51 @@ class DocumentProcessor:
 
             # Convert to JPEG bytes to release PIL image reference during API call
             img_buffer = io.BytesIO()
-            rgb_image = image.convert("RGB") if image.mode != "RGB" else image
-            rgb_image.save(img_buffer, format="JPEG", quality=85)
+            prepared_image = image.convert("RGB") if image.mode != "RGB" else image
+            prepared_image.save(img_buffer, format="JPEG", quality=85)
             img_bytes = img_buffer.getvalue()
             img_buffer.close()
-            if rgb_image is not image:
-                rgb_image.close()
-                del rgb_image
-
-            # Use bytes for API call so PIL image can be freed by caller
-            import google.generativeai as genai_module
-
-            img_part = {"mime_type": "image/jpeg", "data": img_bytes}
 
             loop = asyncio.get_running_loop()
+
+            if self._vision_model:
+                response = await loop.run_in_executor(
+                    _thread_pool,
+                    lambda: self._vision_model.generate_content([prompt, prepared_image]),
+                )
+                if prepared_image is not image:
+                    prepared_image.close()
+                return getattr(response, "text", "").strip()
+
+            import base64
+
+            base64_image = base64.b64encode(img_bytes).decode("utf-8")
             response = await loop.run_in_executor(
                 _thread_pool,
-                lambda: self._vision_model.generate_content([prompt, img_part]),
+                lambda: self._vision_client.chat.completions.create(
+                    model=settings.GEMINI_VISION_MODEL,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                    max_tokens=500,
+                ),
             )
 
-            del img_bytes
-            return response.text.strip()
+            if prepared_image is not image:
+                prepared_image.close()
+
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logger.warning("vision_api_failed", error=str(e))
             return ""

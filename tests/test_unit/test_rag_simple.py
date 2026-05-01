@@ -1,24 +1,28 @@
-import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.services.rag import RAGPipeline, RAGResult
 
-@pytest.fixture
-def mock_deps():
-    return {
-        'vs': AsyncMock(),
-        'llm': AsyncMock(),
-        'eg': AsyncMock()
-    }
+import pytest
+
+from app.core.guardrails import GuardrailAction
+from app.services.rag import RAGPipeline
+
 
 @pytest.mark.asyncio
-async def test_query_direct_execution(mock_deps):
-    with patch('app.services.rag.get_guardrails') as mock_gr:
-        mock_gr.return_value.check_input.return_value = MagicMock(action='allow', sanitized_input=None)
-        pipe = RAGPipeline(vector_store=mock_deps['vs'], llm_service=mock_deps['llm'], efficiency_guard=None)
-        
-        mock_deps['llm'].generate.return_value = MagicMock(content='Direct Answer', success=True)
-        
-        # Test NO_FETCH path
-        res = await pipe.query('halo')
-        assert res.answer == 'Direct Answer'
+async def test_query_direct_execution():
+    with patch("app.services.rag.get_guardrails") as mock_gr:
+        guardrails = MagicMock()
+        guardrails.check_input.return_value = MagicMock(
+            action=GuardrailAction.ALLOW,
+            sanitized_input=None,
+            reason=None,
+            message=None,
+        )
+        mock_gr.return_value = guardrails
+
+        llm = MagicMock()
+        llm.generate = AsyncMock(return_value=MagicMock(content="Direct Answer", tokens_used=5, success=True, error=None))
+
+        pipe = RAGPipeline(vector_store=MagicMock(), llm_service=llm, efficiency_guard=None)
+        res = await pipe.query("halo")
+
+        assert res.answer == "Direct Answer"
+        assert res.success is True

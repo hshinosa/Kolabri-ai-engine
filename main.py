@@ -21,6 +21,8 @@ from app.services.vector_store import get_vector_store
 from app.services.mongodb_logger import get_mongo_logger
 from app.services.logic_listener import get_logic_listener
 from app.services.notification_service import get_notification_service
+from app.services.rag import get_rag_pipeline
+from app.services.conformance_checker import ConformanceChecker
 
 # Setup logging
 setup_logging()
@@ -92,6 +94,13 @@ async def lifespan(app: FastAPI):
     
     mongo_logger = get_mongo_logger()
     await mongo_logger.connect()
+
+    # Warm up safety and orchestration services so the enriched TA flow
+    # is ready before the first request arrives.
+    get_logic_listener()
+    get_notification_service()
+    get_rag_pipeline()
+    ConformanceChecker()
     
     # Start background monitor
     monitor_task = asyncio.create_task(silence_monitor_task())

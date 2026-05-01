@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # [PHASE 4: MULTIMODAL RAG]
     ENABLE_MULTIMODAL_PROCESSING: bool = True
-    GEMINI_VISION_MODEL: str = "gemini-2.0-flash"
+    GEMINI_VISION_MODEL: str = "gpt-4o-mini"
     MIN_IMAGE_WIDTH: int = 250
     MIN_IMAGE_HEIGHT: int = 250
     STORAGE_IMAGE_DIR: str = "./data/static/images"

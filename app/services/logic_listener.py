@@ -10,6 +10,7 @@ Real-time monitoring for group discussion dynamics:
 import time
 import asyncio
 import random
+import math
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
@@ -340,18 +341,20 @@ class LogicListener:
                 metadata={"participant_count": len(participation)}
             )
         
-        # Calculate Gini coefficient
+        total_messages = sum(participation.values())
         gini = self._calculate_gini_coefficient(list(participation.values()))
+        gini_norm = self._calculate_normalized_gini(participation)
         
         logger.info(
             "participation_equity_checked",
             group_id=group_id,
             gini=round(gini, 3),
+            gini_norm=round(gini_norm, 3),
             participants=len(participation),
             distribution=participation
         )
         
-        if gini > self.PARTICIPATION_INEQUITY_THRESHOLD:
+        if self._should_intervene_participation(participation, total_messages):
             # Find the least active user
             least_active_user = min(participation.items(), key=lambda x: x[1])[0]
             
@@ -366,6 +369,8 @@ class LogicListener:
                     reason=f"Participation inequity detected: Gini = {round(gini, 3)}",
                     metadata={
                         "gini_coefficient": gini,
+                        "gini_norm": gini_norm,
+                        "total_messages": total_messages,
                         "threshold": self.PARTICIPATION_INEQUITY_THRESHOLD,
                         "distribution": participation,
                         "least_active_user": least_active_user
@@ -377,10 +382,12 @@ class LogicListener:
             return InterventionTrigger(
                 should_intervene=True,
                 intervention_type=InterventionType.PARTICIPATION_INEQUITY,
-                reason=f"Participation inequity detected (Gini: {round(gini, 3)})",
+                reason=f"Participation inequity detected (Gini: {round(gini, 3)}, Gini_norm: {round(gini_norm, 3)})",
                 suggested_message=intervention_msg,
                 metadata={
                     "gini_coefficient": gini,
+                    "gini_norm": gini_norm,
+                    "total_messages": total_messages,
                     "distribution": participation,
                     "least_active_user": least_active_user
                 }
@@ -391,7 +398,7 @@ class LogicListener:
             intervention_type=None,
             reason="",
             suggested_message="",
-            metadata={"gini_coefficient": gini}
+            metadata={"gini_coefficient": gini, "gini_norm": gini_norm, "total_messages": total_messages}
         )
     
     def get_all_silent_groups(self) -> List[str]:
@@ -423,8 +430,10 @@ class LogicListener:
         Returns:
             Cosine similarity score (0.0 - 1.0)
         """
-        dot_product = np.dot(vec1, vec2)
-        norm_product = np.linalg.norm(vec1) * np.linalg.norm(vec2)
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = math.sqrt(sum(a * a for a in vec1))
+        norm2 = math.sqrt(sum(b * b for b in vec2))
+        norm_product = norm1 * norm2
         
         if norm_product == 0:
             return 0.0
@@ -432,14 +441,31 @@ class LogicListener:
         return float(dot_product / norm_product)
     
     def _calculate_gini_coefficient(self, values: List[int]) -> float:
-        """Optimized Gini coefficient using NumPy."""
+        """Optimized Gini coefficient using pure Python math."""
         if not values or sum(values) == 0:
             return 0.0
-        
-        v = np.sort(np.array(values))
-        n = len(v)
-        index = np.arange(1, n + 1)
-        return float((np.sum((2 * index - n - 1) * v)) / (n * np.sum(v)))
+
+        sorted_values = sorted(values)
+        n = len(sorted_values)
+        total = sum(sorted_values)
+        weighted_sum = sum((2 * i - n - 1) * val for i, val in enumerate(sorted_values, start=1))
+        return float(weighted_sum / (n * total))
+
+    def _calculate_normalized_gini(self, distribution: Dict[str, int]) -> float:
+        """Calculate TA-normalized Gini coefficient: Gini × √N_users."""
+        values = list(distribution.values())
+        if len(values) < 2:
+            return 0.0
+
+        raw_gini = self._calculate_gini_coefficient(values)
+        return float(raw_gini * math.sqrt(len(values)))
+
+    def _should_intervene_participation(self, distribution: Dict[str, int], total_messages: int) -> bool:
+        """Apply TA threshold and cold-start protection for participation inequity."""
+        if total_messages <= 10:
+            return False
+
+        return self._calculate_normalized_gini(distribution) > 0.6
     
     def _get_off_topic_intervention(self, topic: str) -> str:
         """Get random off-topic message."""

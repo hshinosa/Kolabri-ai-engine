@@ -82,7 +82,8 @@ class TestMongoDBLoggerConnect:
             logger.enabled = True
             await logger.connect()
 
-            MockMotor.assert_called_once_with("mongodb://localhost:27017")
+            MockMotor.assert_called_once()
+            assert MockMotor.call_args.args[0] == "mongodb://localhost:27017"
             mock_client.admin.command.assert_awaited_once_with("ping")
             assert mock_db.activity_logs.create_index.await_count == 2
             mock_db.silence_events.create_index.assert_awaited_once()

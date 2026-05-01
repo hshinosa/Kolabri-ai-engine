@@ -272,6 +272,7 @@ class GroupAnalyticsResponse(BaseModel):
     participants: List[str] = []
     participant_count: int = 0
     engagement_distribution: Dict[str, int] = {}
+    hot_percentage: Optional[float] = None
     error: Optional[str] = None
 
 
@@ -320,4 +321,27 @@ class GuardrailCheckResponse(BaseModel):
     sanitized_text: Optional[str] = None
     triggered_rules: List[str] = []
     confidence: float = 1.0
+
+
+# ============== Personal AI Chat ==============
+
+class PersonalChatMessage(BaseModel):
+    """A message in personal AI chat history."""
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class PersonalChatRequest(BaseModel):
+    """Request for personal AI chat (multi-turn, no RAG)."""
+    message: str = Field(..., min_length=1, max_length=10000)
+    history: List[PersonalChatMessage] = Field(default_factory=list, max_length=50)
+    user_name: Optional[str] = None
+
+
+class PersonalChatResponse(BaseModel):
+    """Response from personal AI chat."""
+    reply: str
+    success: bool = True
+    tokens_used: int = 0
+    error: Optional[str] = None
 
