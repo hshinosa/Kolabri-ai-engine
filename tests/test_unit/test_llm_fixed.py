@@ -4,9 +4,9 @@ from app.services.llm import OpenAILLMService, LLMResponse, ChatMessage
 
 @pytest.fixture
 def llm_service():
-    with patch('app.services.llm.AsyncOpenAI') as mock_openai:
+    with patch('app.services.llm.httpx.AsyncClient') as mock_httpx, \
+         patch('app.services.llm.AsyncOpenAI') as mock_openai:
         mock_client = MagicMock()
-        # Ensure the create call is an AsyncMock
         mock_client.chat.completions.create = AsyncMock()
         mock_openai.return_value = mock_client
         

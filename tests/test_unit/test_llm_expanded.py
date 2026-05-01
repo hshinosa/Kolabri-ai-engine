@@ -8,7 +8,8 @@ from app.services.llm import ChatMessage, LLMResponse, OpenAILLMService, get_llm
 
 @pytest.fixture
 def llm_service():
-    with patch("app.services.llm.AsyncOpenAI"):
+    with patch("app.services.llm.httpx.AsyncClient"), \
+         patch("app.services.llm.AsyncOpenAI"):
         with patch.object(llm_module.settings, "OPENAI_API_KEY", "test-key"), patch.object(
             llm_module.settings, "OPENAI_BASE_URL", "http://test"
         ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"):
@@ -79,7 +80,8 @@ async def test_get_goal_refinement_suggestion(llm_service):
 
 def test_singleton():
     llm_module._llm_service = None
-    with patch("app.services.llm.AsyncOpenAI"):
+    with patch("app.services.llm.httpx.AsyncClient"), \
+         patch("app.services.llm.AsyncOpenAI"):
         with patch.object(llm_module.settings, "OPENAI_API_KEY", "test-key"), patch.object(
             llm_module.settings, "OPENAI_BASE_URL", "http://test"
         ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"):

@@ -31,6 +31,7 @@ from app.services.llm import (
 def llm_service():
     """Create LLM service with mocked dependencies."""
     with (
+        patch("app.services.llm.httpx.AsyncClient"),
         patch("app.services.llm.settings") as mock_settings,
         patch("app.services.llm.AsyncOpenAI") as mock_openai,
     ):

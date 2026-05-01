@@ -2,6 +2,7 @@
 Tests for Goal Validator Service - 100% Coverage
 """
 import pytest
+from unittest.mock import MagicMock, AsyncMock, patch
 from app.services.goal_validator import (
     GoalValidator,
     SMARTCriterion,
@@ -333,10 +334,21 @@ class TestGoalValidator:
     @pytest.mark.asyncio
     async def test_refine_goal(self, validator):
         """Test refine_goal method."""
-        current_goal = "Saya ingin belajar"
-        missing_criteria = ["measurable", "time_bound"]
+        import json
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(return_value=MagicMock(
+            success=True, content=json.dumps({
+                "refined_goal": "Membuat 5 prototype UI dalam 3 hari",
+                "explanation": "Ditambahkan target terukur dan batas waktu",
+                "suggestions": ["Gunakan Figma", "Buat wireframe dulu"]
+            })
+        ))
         
-        result = await validator.refine_goal(current_goal, missing_criteria)
+        with patch('app.services.llm.get_llm_service', return_value=mock_llm):
+            current_goal = "Saya ingin belajar"
+            missing_criteria = ["measurable", "time_bound"]
+            
+            result = await validator.refine_goal(current_goal, missing_criteria)
         
         assert "refined_goal" in result
         assert "success" in result

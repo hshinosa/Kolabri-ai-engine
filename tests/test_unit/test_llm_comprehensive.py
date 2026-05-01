@@ -25,7 +25,8 @@ def mock_openai_client():
 
 @pytest.fixture
 def llm_service(mock_openai_client):
-    with patch("app.services.llm.AsyncOpenAI", return_value=mock_openai_client):
+    with patch("app.services.llm.httpx.AsyncClient"), \
+         patch("app.services.llm.AsyncOpenAI", return_value=mock_openai_client):
         with patch.object(llm_module.settings, "OPENAI_API_KEY", "test_key"), patch.object(
             llm_module.settings, "OPENAI_BASE_URL", "http://test.com"
         ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"), patch.object(
@@ -63,7 +64,8 @@ class TestChatMessage:
 
 class TestOpenAILLMService:
     def test_init(self, mock_openai_client):
-        with patch("app.services.llm.AsyncOpenAI", return_value=mock_openai_client):
+        with patch("app.services.llm.httpx.AsyncClient"), \
+             patch("app.services.llm.AsyncOpenAI", return_value=mock_openai_client):
             with patch.object(llm_module.settings, "OPENAI_API_KEY", "test_key"), patch.object(
                 llm_module.settings, "OPENAI_BASE_URL", "http://test.com"
             ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"), patch.object(
@@ -195,7 +197,8 @@ class TestOpenAILLMService:
 class TestGetLLMService:
     def test_get_llm_service_singleton(self):
         llm_module._llm_service = None
-        with patch("app.services.llm.AsyncOpenAI"):
+        with patch("app.services.llm.httpx.AsyncClient"), \
+             patch("app.services.llm.AsyncOpenAI"):
             with patch.object(llm_module.settings, "OPENAI_API_KEY", "test_key"), patch.object(
                 llm_module.settings, "OPENAI_BASE_URL", "http://test.com"
             ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"):

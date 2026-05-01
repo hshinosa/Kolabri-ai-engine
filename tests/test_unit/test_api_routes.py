@@ -30,9 +30,10 @@ app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
+@patch('app.services.llm.get_llm_service')
 @patch('app.api.routes.get_vector_store')
 @patch('app.api.routes.get_llm_service')
-def test_health_check_healthy(mock_llm, mock_vs):
+def test_health_check_healthy(mock_llm, mock_vs, mock_llm_svc):
     mock_vs_instance = MagicMock()
     mock_vs_instance._ensure_collection = AsyncMock()
     mock_vs.return_value = mock_vs_instance
@@ -40,6 +41,7 @@ def test_health_check_healthy(mock_llm, mock_vs):
     mock_llm_instance = MagicMock()
     mock_llm_instance.model = "test-model"
     mock_llm.return_value = mock_llm_instance
+    mock_llm_svc.return_value = mock_llm_instance
     
     response = client.get("/health")
     assert response.status_code == 200
