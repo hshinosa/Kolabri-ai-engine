@@ -1,3 +1,9 @@
+[project]
+name = "kolabri-ai-engine"
+version = "1.1.0"
+description = "AI Engine for Kolabri collaborative learning platform - RAG, NLP analytics, process mining"
+requires-python = ">=3.11"
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 testpaths = ["tests"]
