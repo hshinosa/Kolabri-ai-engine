@@ -5,7 +5,13 @@ from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.prompt_styles import GROUP_DISCUSSION_STYLE, GROUP_INTERVENTION_STYLE, SUMMARY_STYLE
+from app.core.prompt_templates import (
+    SYSTEM_RAG, SYSTEM_PERSONAL_CHAT, SYSTEM_INTERVENTION, SYSTEM_SUMMARY,
+    SYSTEM_SOCRATIC, SYSTEM_GOAL_VALIDATION, SYSTEM_GOAL_REFINEMENT,
+    RAG_FEW_SHOT, COT_RAG_TEMPLATE, COT_RAG_WITH_HISTORY,
+    COT_INTERVENTION_TEMPLATE, COT_SUMMARY_TEMPLATE,
+    COT_GOAL_VALIDATION, COT_GOAL_REFINEMENT, TEMPERATURE,
+)
 import httpx
 
 logger = get_logger(__name__)
@@ -34,10 +40,13 @@ class LLMResponse:
 
 class OpenAILLMService:
     SYSTEM_PROMPTS = {
-        'default': 'Anda adalah asisten AI Kolabri yang membantu mahasiswa.',
-        'rag': 'Anda adalah asisten diskusi akademik Kolabri. ' + GROUP_DISCUSSION_STYLE,
-        'intervention': 'Anda adalah fasilitator diskusi akademik Kolabri. ' + GROUP_INTERVENTION_STYLE,
-        'summary': 'Anda adalah peringkas diskusi akademik Kolabri. ' + SUMMARY_STYLE
+        'default': SYSTEM_PERSONAL_CHAT,
+        'rag': SYSTEM_RAG,
+        'intervention': SYSTEM_INTERVENTION,
+        'summary': SYSTEM_SUMMARY,
+        'socratic': SYSTEM_SOCRATIC,
+        'goal_validation': SYSTEM_GOAL_VALIDATION,
+        'goal_refinement': SYSTEM_GOAL_REFINEMENT,
     }
     
     def __init__(self):
@@ -143,27 +152,21 @@ class OpenAILLMService:
         chat_history: Optional[List[ChatMessage]] = None,
         fading_level: float = 0.0,
     ) -> LLMResponse:
-        """Generate a RAG-enhanced response with scaffolding instructions."""
-        instr = self._get_scaffolding_instruction(fading_level)
         ctx_text = self._format_contexts(contexts)
+        system_prompt = self.SYSTEM_PROMPTS["rag"] + "\n\n" + RAG_FEW_SHOT
 
-        system_prompt = self.SYSTEM_PROMPTS["rag"]
         if chat_history:
             history_text = self._format_chat_history(chat_history)
-            prompt = f"Riwayat Diskusi:\n{history_text}\n\nKonteks:\n{ctx_text}\n\nPertanyaan: {query}\n\nInstruksi: {instr}"
+            prompt = COT_RAG_WITH_HISTORY.format(
+                history=history_text, contexts=ctx_text, query=query
+            )
         else:
-            prompt = f"Konteks:\n{ctx_text}\n\nPertanyaan: {query}\n\nInstruksi: {instr}"
+            prompt = COT_RAG_TEMPLATE.format(contexts=ctx_text, query=query)
 
-        return await self.generate(prompt=prompt, system_prompt=system_prompt)
-
-    def _get_scaffolding_instruction(self, fading_level: float) -> str:
-        """Get instruction based on fading level (fading-out scaffolding)."""
-        if fading_level < settings.SCAFFOLDING_FULL_THRESHOLD:
-            return "Berikan panduan langkah-demi-langkah yang sangat mendetail."
-        elif fading_level < settings.SCAFFOLDING_MINIMAL_THRESHOLD:
-            return "Berikan petunjuk umum (hint) tanpa memberikan jawaban langsung."
-        else:
-            return "Gunakan teknik Socratic Questioning untuk membimbing mahasiswa menemukan jawabannya sendiri."
+        return await self.generate(
+            prompt=prompt, system_prompt=system_prompt,
+            temperature=TEMPERATURE["rag"]
+        )
 
     async def generate_intervention(
         self,
@@ -171,45 +174,51 @@ class OpenAILLMService:
         intervention_type: str = "redirect",
         topic: Optional[str] = None,
     ) -> LLMResponse:
-        """Generate a proactive intervention message."""
-        text = "\n".join(
-            [
-                f"{m.get('sender', 'User')}: {m.get('content', '')}"
-                for m in chat_messages[-10:]
-            ]
+        messages_text = "\n".join(
+            f"{m.get('sender', 'User')}: {m.get('content', '')}"
+            for m in chat_messages[-10:]
         )
-        prompt = f"Tipe Intervensi: {intervention_type}\nTopik: {topic or 'Umum'}\n\nDiskusi Terakhir:\n{text}"
+        prompt = COT_INTERVENTION_TEMPLATE.format(
+            topic=topic or "Umum",
+            intervention_type=intervention_type,
+            messages=messages_text,
+        )
         return await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["intervention"]
+            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["intervention"],
+            temperature=TEMPERATURE["intervention"]
         )
 
     async def generate_summary(
         self, messages: List[Dict[str, Any]], include_action_items: bool = True
     ) -> LLMResponse:
-        """Generate a summary of the discussion."""
-        text = "\n".join(
-            [f"{m.get('sender', 'User')}: {m.get('content', '')}" for m in messages]
+        messages_text = "\n".join(
+            f"{m.get('sender', 'User')}: {m.get('content', '')}" for m in messages
         )
-        prompt = f"Ringkas diskusi berikut ini. {'Sertakan action items.' if include_action_items else ''}\n\nDiskusi:\n{text}"
+        prompt = COT_SUMMARY_TEMPLATE.format(messages=messages_text)
         return await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["summary"]
+            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["summary"],
+            temperature=TEMPERATURE["summary"]
         )
 
     async def reframe_to_socratic(self, response: str) -> str:
-        """Reframe a direct answer into a Socratic questioning hint."""
-        prompt = f"Ubah jawaban berikut menjadi pertanyaan Socratic yang membimbing: {response}"
+        prompt = f"Jawaban langsung yang perlu diubah:\n{response}\n\nBuat 2-3 pertanyaan Socratic bertahap yang mengarah ke jawaban tersebut."
         result = await self.generate(
-            prompt=prompt, system_prompt="Anda adalah ahli Socratic questioning."
+            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["socratic"],
+            temperature=TEMPERATURE["socratic"]
         )
         return result.content if result.success else response
 
     async def get_goal_refinement_suggestion(
         self, current_goal: str, missing_criteria: List[str]
     ) -> LLMResponse:
-        """Generate suggestions to refine a student's learning goal."""
-        criteria_list = ", ".join(missing_criteria)
-        prompt = f"Goal saat ini: {current_goal}\nKriteria SMART yang kurang: {criteria_list}\n\nBantu mahasiswa memperbaiki goal ini dengan pertanyaan pemandu."
-        return await self.generate(prompt=prompt)
+        prompt = COT_GOAL_REFINEMENT.format(
+            current_goal=current_goal,
+            missing_criteria=", ".join(missing_criteria)
+        )
+        return await self.generate(
+            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["goal_refinement"],
+            temperature=TEMPERATURE["goal_refinement"]
+        )
 
     def _format_contexts(self, contexts: List[Dict[str, Any]]) -> str:
         """Format retrieved contexts for the prompt."""

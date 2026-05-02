@@ -134,10 +134,10 @@ class TestOpenAILLMService:
         response = await llm_service.generate_rag_response("Test", [{"content": "Context"}], chat_history=history)
         assert response.success is True
 
-    def test_get_scaffolding_instruction(self, llm_service):
-        assert "langkah-demi-langkah" in llm_service._get_scaffolding_instruction(0.1)
-        assert "petunjuk umum" in llm_service._get_scaffolding_instruction(0.5)
-        assert "Socratic Questioning" in llm_service._get_scaffolding_instruction(0.8)
+    def test_system_prompts_contain_anti_hallucination_rules(self, llm_service):
+        assert "JANGAN pernah mengarang" in llm_service.SYSTEM_PROMPTS["rag"]
+        assert "HANYA berdasarkan konteks" in llm_service.SYSTEM_PROMPTS["rag"]
+        assert "Socratic" in llm_service.SYSTEM_PROMPTS["socratic"]
 
     @pytest.mark.asyncio
     async def test_generate_intervention(self, llm_service):

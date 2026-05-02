@@ -344,47 +344,19 @@ class GoalValidator:
         )
         
         try:
-            # Import LLM service
             from app.services.llm import get_llm_service
+            from app.core.prompt_templates import COT_GOAL_REFINEMENT, SYSTEM_GOAL_REFINEMENT, TEMPERATURE
             llm = get_llm_service()
             
-            # Construct refinement prompt
-            criteria_explanations = {
-                "specific": "Gunakan kata kerja operasional yang jelas (contoh: membuat, menganalisis, merancang)",
-                "measurable": "Tambahkan target yang dapat diukur (contoh: 10 halaman, 5 prototype, minimal 80%)",
-                "time_bound": "Tentukan batas waktu yang jelas (contoh: minggu depan, dalam 3 hari, sebelum tanggal 15)"
-            }
+            prompt = COT_GOAL_REFINEMENT.format(
+                current_goal=current_goal,
+                missing_criteria=", ".join(missing_criteria)
+            )
             
-            criteria_text = "\n".join([
-                f"- {c}: {criteria_explanations.get(c, '')}"
-                for c in missing_criteria
-            ])
-            
-            prompt = f"""
-            Anda adalah asisten AI Kolabri yang membantu mahasiswa memperbaiki tujuan belajar mereka.
-            
-            Tujuan saat ini: "{current_goal}"
-            
-            Kriteria yang kurang:
-            {criteria_text}
-            
-            Tugas:
-            1. Perbaiki tujuan di atas agar memenuhi kriteria yang kurang
-            2. Jaga agar tujuan tetap realistis dan dapat dicapai
-            3. Berikan versi yang lebih baik dan spesifik
-            
-            Output format JSON:
-            {{
-                "refined_goal": "tujuan yang sudah diperbaiki",
-                "explanation": "penjelasan singkat tentang perubahan yang dilakukan",
-                "suggestions": ["saran 1", "saran 2"]
-            }}
-            """
-            
-            # Generate refined goal using LLM
             response = await llm.generate(
                 prompt=prompt,
-                system_prompt="Anda adalah asisten AI yang membantu mahasiswa membuat tujuan belajar yang SMART (Specific, Measurable, Achievable, Relevant, Time-bound)."
+                system_prompt=SYSTEM_GOAL_REFINEMENT,
+                temperature=TEMPERATURE["goal_refinement"]
             )
             
             # Parse JSON response

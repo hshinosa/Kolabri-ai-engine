@@ -13,7 +13,7 @@ import math
 from app.core.logging import get_logger
 from app.core.guardrails import get_guardrails, GuardrailAction
 from app.core.config import settings
-from app.core.prompt_styles import GROUP_DISCUSSION_STYLE
+from app.core.prompt_templates import SYSTEM_PERSONAL_CHAT, SYSTEM_RAG_NO_CONTEXT, TEMPERATURE
 from app.services.vector_store import get_vector_store, VectorStoreService
 from app.services.llm import get_llm_service, OpenAILLMService, ChatMessage
 from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
@@ -222,7 +222,6 @@ class RAGPipeline:
                 action_taken = "FETCH" if should_fetch else "NO_FETCH"
                 
                 if not should_fetch:
-                    # NO_FETCH: Skip retrieval, use LLM directly
                     logger.info(
                         "rag_policy_no_fetch",
                         query=safe_query[:100],
@@ -231,9 +230,8 @@ class RAGPipeline:
                     
                     llm_response = await self.llm_service.generate(
                         prompt=query,
-                        system_prompt="""Anda adalah asisten diskusi akademik Kolabri.
-Berikan respons yang ramah, membantu, dan relevan untuk pertanyaan atau sapaan sederhana dalam konteks pembelajaran.
-""" + GROUP_DISCUSSION_STYLE
+                        system_prompt=SYSTEM_PERSONAL_CHAT,
+                        temperature=TEMPERATURE["personal_chat"]
                     )
                     
                     processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -270,16 +268,12 @@ Berikan respons yang ramah, membantu, dan relevan untuk pertanyaan atau sapaan s
                     )
                     
                     if not search_results:
-                        # No relevant documents found
                         logger.warning("rag_no_results", query=query[:100])
                         
-                        # Generate response without context
                         llm_response = await self.llm_service.generate(
                             prompt=query,
-                            system_prompt="""Anda adalah asisten diskusi akademik Kolabri.
-Tidak ada dokumen relevan yang ditemukan untuk pertanyaan ini.
-Berikan jawaban umum yang tetap membantu, jelaskan keterbatasannya dengan jujur, dan bila relevan sarankan untuk mengunggah dokumen yang sesuai.
-""" + GROUP_DISCUSSION_STYLE
+                            system_prompt=SYSTEM_RAG_NO_CONTEXT,
+                            temperature=TEMPERATURE["rag_no_context"]
                         )
                         
                         processing_time = (datetime.now() - start_time).total_seconds() * 1000

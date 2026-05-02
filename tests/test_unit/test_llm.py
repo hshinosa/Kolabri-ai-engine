@@ -341,35 +341,28 @@ async def test_generate_rag_response_with_chat_history(llm_service):
 
 
 @pytest.mark.asyncio
-async def test_rag_response_with_fading_full_scaffolding(llm_service):
-    """Test RAG response with full scaffolding (fading level 0)."""
+async def test_rag_response_uses_cot_template(llm_service):
     service, mock_client = llm_service
 
     result = await service.generate_rag_response(
-        query="How do I do this?", contexts=[], fading_level=0.0
+        query="Apa itu gradient descent?", contexts=[{"content": "test", "metadata": {"source": "doc.pdf"}}], fading_level=0.0
     )
 
     assert result.success is True
-
-    # Check for full scaffolding instruction
     prompt = mock_client.chat.completions.create.call_args[1]["messages"][-1]["content"]
-    assert "langkah-demi-langkah" in prompt.lower()
+    assert "INSTRUKSI MENJAWAB" in prompt
 
 
 @pytest.mark.asyncio
-async def test_rag_response_with_fading_minimal_scaffolding(llm_service):
-    """Test RAG response with minimal scaffolding (fading level 0.5)."""
+async def test_rag_response_includes_few_shot_in_system(llm_service):
     service, mock_client = llm_service
 
-    result = await service.generate_rag_response(
-        query="How do I do this?", contexts=[], fading_level=0.5
+    await service.generate_rag_response(
+        query="test", contexts=[{"content": "ctx", "metadata": {}}], fading_level=0.5
     )
 
-    assert result.success is True
-
-    # Check for minimal scaffolding instruction
-    prompt = mock_client.chat.completions.create.call_args[1]["messages"][-1]["content"]
-    assert "petunjuk umum" in prompt or "hint" in prompt.lower()
+    system = mock_client.chat.completions.create.call_args[1]["messages"][0]["content"]
+    assert "CONTOH JAWABAN YANG BENAR" in system
 
 
 @pytest.mark.asyncio
