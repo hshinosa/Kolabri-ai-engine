@@ -81,10 +81,13 @@ class XESExporter:
         attr.set("key", key)
         attr.set("value", str(value))
 
-    def _add_date_attr(self, parent: ET.Element, key: str, value: datetime) -> None:
+    def _add_date_attr(self, parent: ET.Element, key: str, value) -> None:
         attr = ET.SubElement(parent, "date")
         attr.set("key", key)
-        attr.set("value", value.isoformat())
+        if isinstance(value, str):
+            attr.set("value", value)
+        else:
+            attr.set("value", value.isoformat())
 
     def _add_float_attr(self, parent: ET.Element, key: str, value: float) -> None:
         attr = ET.SubElement(parent, "float")

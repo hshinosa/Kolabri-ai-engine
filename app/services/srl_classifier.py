@@ -26,16 +26,20 @@ class SRLClassifier:
     FORETHOUGHT_PATTERNS = {
         "goal_setting": [
             r"\b(tujuan|sasaran|target|goal|objective)\b",
-            r"\b(ingin|mau|akan)\s+(memahami|mempelajari|menguasai)",
+            r"\b(ingin|mau|akan)\s+(memahami|mempelajari|menguasai|belajar|membuat)",
             r"\b(hari ini kita|kita akan|mari kita)\s+(bahas|diskusikan|pelajari)",
-            r"\b(fokus|prioritas)\s+(kita|hari ini)",
+            r"\b(fokus|prioritas)\s+(kita|hari ini|saya)",
+            r"\b(niat|berniat|bermaksud)\b",
         ],
         "planning": [
-            r"\b(rencana|strategi|langkah|plan)\b",
+            r"\b(rencana|strategi|langkah|plan|berencana|merencanakan)\b",
             r"\b(pertama|kedua|ketiga|selanjutnya)\b.*\b(kita|akan)\b",
             r"\b(mari|ayo)\s+(mulai|kita mulai|kita bagi)",
             r"\b(pembagian|bagi)\s+(tugas|peran|topik)",
             r"\b(deadline|tenggat|batas waktu)\b",
+            r"\b(jadwal|schedule|timeline)\b",
+            r"\b(persiapan|mempersiapkan|menyiapkan)\b",
+            r"\b(minggu ini|minggu depan|besok|nanti)\s+(akan|mau|saya)",
         ],
     }
 
