@@ -26,7 +26,16 @@ sys.modules['docx'] = MagicMock()
 sys.modules['pptx'] = MagicMock()
 sys.modules['openpyxl'] = MagicMock()
 sys.modules['pandas'] = MagicMock()
-sys.modules['numpy'] = MagicMock()
+_numpy_mock = MagicMock()
+_numpy_mock.floating = float
+_numpy_mock.integer = int
+_numpy_mock.ndarray = list
+_numpy_mock.float64 = float
+_numpy_mock.float32 = float
+_numpy_mock.int64 = int
+_numpy_mock.int32 = int
+_numpy_mock.bool_ = bool
+sys.modules['numpy'] = _numpy_mock
 _pil_mock = MagicMock()
 
 class _FakeImage:
