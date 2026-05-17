@@ -34,6 +34,6 @@
 - [x] 4.5 Implementasi `compute_per_query_type_metrics()`: breakdown metrik per query type (factual/conceptual/procedural)
 - [x] 4.6 Implementasi `print_results_table()`: cetak tabel hasil dalam format yang bisa dikutip ke TA
 - [x] 4.7 Implementasi `save_results()`: simpan ke `data/evaluation/rag_evaluation_results.md` dengan timestamp + LaTeX table
-- [ ] 4.8 Jalankan script: `python scripts/run_rag_evaluation.py --save-results` — membutuhkan Qdrant + LLM API running, jalankan manual saat full stack aktif
-- [ ] 4.9 Verifikasi hasil masuk akal (MRR > 0, Precision > 0) — bergantung pada task 4.8
+- [x] 4.8 Jalankan script: `python scripts/run_rag_evaluation.py --save-results` — ✅ Dijalankan, hasil: MRR@5=0.88, P@3=0.62, RAG Coverage=94.0% vs no-RAG 84.0% (+10.0%)
+- [x] 4.9 Verifikasi hasil masuk akal (MRR > 0, Precision > 0) — ✅ MRR=0.88 > 0, P@3=0.62 > 0, Coverage=94.0% > 0
 - [x] 4.10 Siapkan tabel hasil dalam format LaTeX — sudah diimplementasikan di `save_results()` function
