@@ -5,27 +5,30 @@ FastAPI service that handles RAG queries, NLP analytics, and chat interventions 
 ## Architecture
 
 ```
-Core API (Express) → AI Engine (FastAPI) → Gemini LLM
-                                         → ChromaDB (vector store)
+Core API (Express) → AI Engine (FastAPI) → OpenAI-compatible API (LLM)
+                                         → Qdrant (vector store)
                                          → MongoDB (event logs)
+                                         → Redis (cache)
 ```
 
 The AI Engine receives requests from the Core API (authenticated via `CORE_API_SECRET`). It processes documents, answers questions using course materials as context, and analyzes group discussions for intervention triggers.
 
 ## What it does
 
-- **RAG pipeline**: embed documents into ChromaDB, retrieve relevant chunks, generate answers via Gemini
+- **RAG pipeline**: embed documents into Qdrant via FastEmbed (local multilingual model), retrieve relevant chunks, generate answers via LLM
 - **Document processing**: extract text from PDF, DOCX, PPTX (with optional OCR)
 - **Chat intervention**: detect silence, off-topic drift, low engagement — generate prompts or summaries
 - **NLP analytics**: engagement scoring, Higher Order Thinking detection, lexical diversity (Gini coefficient)
 - **Process mining**: log learning events in XES-compatible format for ProM/Disco analysis
 - **Safety layer**: prompt injection detection, toxicity scoring, PII masking
+- **Reranking**: cross-encoder reranking for improved retrieval quality (requires `sentence-transformers`)
 
 ## Tech stack
 
 - Python 3.11+, FastAPI
-- Google Gemini 2.0 Flash (LLM + embeddings)
-- ChromaDB (vector database)
+- OpenAI-compatible API (DeepSeek V4 Flash or compatible model)
+- Qdrant (vector database, Docker port 6333)
+- FastEmbed — `paraphrase-multilingual-MiniLM-L12-v2` (local embedding, 384 dim)
 - MongoDB via Motor (async event logging)
 - Redis (caching, rate limiting)
 - Pydantic v2 (request/response validation)
@@ -41,13 +44,24 @@ cp .env.example .env
 
 Configure `.env`:
 ```
-GEMINI_API_KEY=your-gemini-api-key
 OPENAI_API_KEY=your-openai-compatible-key
-OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
+OPENAI_MODEL=your-model-name
 MONGODB_URL=mongodb://localhost:27017
 REDIS_URL=redis://localhost:6379
 CORE_API_SECRET=shared-secret-key
+QDRANT_URL=http://localhost:6333
 ```
+
+### Optional: Enable reranking
+
+Reranking improves retrieval quality but requires an additional package:
+
+```bash
+pip install sentence-transformers
+```
+
+When `sentence-transformers` is installed, the cross-encoder reranker activates automatically (`ENABLE_RERANKING=true` by default). Check status via `GET /api/health` — field `reranker_enabled` shows the actual runtime state.
 
 Run:
 ```bash
