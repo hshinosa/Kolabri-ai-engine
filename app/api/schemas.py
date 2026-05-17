@@ -13,11 +13,11 @@ from pydantic import BaseModel, Field
 # ============== Health Check ==============
 
 class HealthResponse(BaseModel):
-    """Health check response."""
     status: str = "healthy"
     version: str
     timestamp: datetime
     services: Dict[str, bool]
+    reranker_enabled: bool = False
 
 
 # ============== PDF Upload ==============

@@ -630,11 +630,13 @@ async def health_check():
 
     overall_status = "healthy" if all(services.values()) else "degraded"
 
+    reranker = get_reranker()
     return HealthResponse(
         status=overall_status,
         version=settings.VERSION,
         timestamp=datetime.now(),
         services=services,
+        reranker_enabled=reranker.enabled,
     )
 
 
@@ -1591,11 +1593,11 @@ async def get_group_analytics_alias(group_id: str):
             group_id=group_id,
             message_count=data.get("message_count", 0),
             quality_score=data.get("quality_score"),
-            quality_breakdown=data.get("quality_breakdown"),
+            quality_breakdown=data.get("quality_breakdown") or {},
             recommendation=data.get("recommendation"),
-            participants=data.get("participants", []),
+            participants=data.get("participants") or [],
             participant_count=data.get("participant_count", 0),
-            engagement_distribution=data.get("engagement_distribution"),
+            engagement_distribution=data.get("engagement_distribution") or {},
             hot_percentage=data.get("hot_percentage"),
         )
 

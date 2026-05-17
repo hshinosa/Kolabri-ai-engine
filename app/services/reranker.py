@@ -72,7 +72,8 @@ class CrossEncoderReranker:
                 retrieve_k=retrieve_k
             )
         else:
-            logger.warning("cross_encoder_reranker_disabled")
+            reason = "sentence_transformers_not_installed" if not CROSS_ENCODER_AVAILABLE else "disabled_by_config"
+            logger.warning("cross_encoder_reranker_disabled", reason=reason, install_hint="pip install sentence-transformers")
     
     async def load_model(self):
         """Load Cross-Encoder model (lazy loading)."""
@@ -84,7 +85,8 @@ class CrossEncoderReranker:
     async def rerank(
         self,
         query: str,
-        documents: List[Dict[str, Any]]
+        documents: List[Dict[str, Any]],
+        top_k: int | None = None,
     ) -> List[Dict[str, Any]]:
         """
         Re-rank documents based on query relevance.
@@ -96,13 +98,15 @@ class CrossEncoderReranker:
         Returns:
             Re-ranked list of documents (top-k)
         """
+        effective_top_k = self.top_k if top_k is None else top_k
+
         if not self.enabled or not documents:
-            return documents[:self.top_k] if len(documents) > self.top_k else documents
+            return documents[:effective_top_k] if len(documents) > effective_top_k else documents
         
         try:
             # Generate cache key
             doc_ids = '|'.join([str(doc.get('id', i)) for i, doc in enumerate(documents)])
-            cache_key = f"{query}:{doc_ids}"
+            cache_key = f"{query}:{doc_ids}:{effective_top_k}"
             
             # Check cache
             async with self._cache_lock:
@@ -136,7 +140,7 @@ class CrossEncoderReranker:
             scored_docs.sort(key=lambda x: x['rerank_score'], reverse=True)
             
             # Return top-K
-            result = scored_docs[:self.top_k]
+            result = scored_docs[:effective_top_k]
             
             # Cache result
             async with self._cache_lock:
@@ -162,7 +166,7 @@ class CrossEncoderReranker:
         except Exception as e:
             logger.error("reranking_failed", error=str(e))
             # Fallback to original order
-            return documents[:self.top_k] if len(documents) > self.top_k else documents
+            return documents[:effective_top_k] if len(documents) > effective_top_k else documents
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get reranker metrics."""
