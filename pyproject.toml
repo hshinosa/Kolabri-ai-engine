@@ -25,6 +25,7 @@ markers = [
     "e2e: marks tests as end-to-end tests",
     "requires_llm: marks tests that require LLM API connection",
     "requires_mongodb: marks tests that require MongoDB connection",
+    "evaluation: marks tests as evaluation harness against gold standard dataset",
 ]
 
 [tool.coverage.run]
