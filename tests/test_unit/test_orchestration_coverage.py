@@ -36,7 +36,7 @@ def patched_settings():
         mock_settings.INTERVENTION_COOLDOWN_MINUTES = 5
         mock_settings.NLP_LOW_LEXICAL_THRESHOLD = 0.3
         mock_settings.NLP_QUALITY_ALERT_THRESHOLD = 40
-        mock_settings.GINI_THRESHOLD = 0.5
+        mock_settings.LOGIC_LISTENER_PARTICIPATION_INEQUITY_THRESHOLD = 0.5
         yield mock_settings
 
 

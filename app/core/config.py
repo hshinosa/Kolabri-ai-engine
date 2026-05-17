@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION_PREFIX: str = "kolabri"
 
     # Embedding (Local FastEmbed)
-    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"
+    EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     # Document Processing
     MAX_FILE_SIZE_MB: int = 10
@@ -76,10 +76,15 @@ class Settings(BaseSettings):
     MIN_IMAGE_HEIGHT: int = 250
     STORAGE_IMAGE_DIR: str = "./data/static/images"
 
+    # Server
+    WORKERS: int = 2
+
     # RAG Configuration
-    TOP_K_RESULTS: int = 5
-    SIMILARITY_THRESHOLD: float = 0.7
+    TOP_K_RESULTS: int = 7
+    SIMILARITY_THRESHOLD: float = 0.6
     RAG_MIN_QUERY_WORDS: int = 3  # Minimum words for FETCH policy
+    RAG_SEMANTIC_CACHE_THRESHOLD: float = 0.85
+    RAG_GROUNDING_THRESHOLD: float = 0.4
 
     # NLP Analytics (SSRL Metrics)
     NLP_LOW_LEXICAL_THRESHOLD: float = 0.3  # Below this = shallow discussion
@@ -139,7 +144,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     # Logic Listener Thresholds
-    GINI_THRESHOLD: float = 0.6
+    LOGIC_LISTENER_OFF_TOPIC_SIMILARITY_THRESHOLD: float = 0.6
+    LOGIC_LISTENER_OFF_TOPIC_CONSECUTIVE_THRESHOLD: int = 3
+    LOGIC_LISTENER_PARTICIPATION_INEQUITY_THRESHOLD: float = 0.6
     SILENCE_THRESHOLD_MINUTES: int = 10
 
     @model_validator(mode="after")

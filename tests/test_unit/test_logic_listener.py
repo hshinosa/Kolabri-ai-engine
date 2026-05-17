@@ -171,7 +171,7 @@ def test_silence_check_recent_activity(listener):
 def test_silence_check_trigger_after_threshold(listener):
     """Test that silence detection triggers after threshold."""
     # Set old timestamp (beyond threshold)
-    old_time = time.time() - (listener.SILENCE_THRESHOLD_MINUTES * 60 + 60)
+    old_time = time.time() - (listener.silence_threshold_minutes * 60 + 60)
     listener._last_message_timestamp["group_1"] = old_time
     
     # Mock _log_intervention to avoid event loop issues
@@ -181,7 +181,7 @@ def test_silence_check_trigger_after_threshold(listener):
     assert result.should_intervene is True
     assert result.intervention_type == InterventionType.SILENCE
     assert len(result.suggested_message) > 0
-    assert result.metadata["idle_minutes"] >= listener.SILENCE_THRESHOLD_MINUTES
+    assert result.metadata["idle_minutes"] >= listener.silence_threshold_minutes
 
 
 # ==============================================================================
@@ -203,7 +203,7 @@ def test_get_all_silent_groups_filters_by_threshold(listener):
     )
     
     # Silent groups (old timestamps)
-    old_time = time.time() - (listener.SILENCE_THRESHOLD_MINUTES * 60 + 60)
+    old_time = time.time() - (listener.silence_threshold_minutes * 60 + 60)
     listener._last_message_timestamp["silent_group_1"] = old_time
     listener._last_message_timestamp["silent_group_2"] = old_time
     
@@ -228,7 +228,7 @@ async def test_participation_check_equal_distribution(listener):
     result = listener.check_participation_inequity("group_1")
     
     assert result.should_intervene is False
-    assert 0.0 <= result.metadata["gini_coefficient"] < listener.PARTICIPATION_INEQUITY_THRESHOLD
+    assert 0.0 <= result.metadata["gini_coefficient"] < listener.participation_inequity_threshold
 
 
 @pytest.mark.asyncio
@@ -242,7 +242,7 @@ async def test_participation_check_unequal_distribution(listener):
         await listener.track_participation("group_1", "silent_user_2")
     
     # Force threshold low for test
-    listener.PARTICIPATION_INEQUITY_THRESHOLD = 0.4
+    listener.participation_inequity_threshold = 0.4
     
     with patch.object(listener, '_log_intervention', new_callable=AsyncMock):
         result = listener.check_participation_inequity("group_1")

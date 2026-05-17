@@ -18,6 +18,7 @@ from enum import Enum
 
 import numpy as np
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.embeddings import get_embedding_service
 from app.services.mongodb_logger import get_mongo_logger
@@ -59,12 +60,7 @@ class LogicListener:
     - Consolidated random selection
     """
     
-    # Thresholds
-    OFF_TOPIC_SIMILARITY_THRESHOLD = 0.6
-    OFF_TOPIC_CONSECUTIVE_THRESHOLD = 3
-    SILENCE_THRESHOLD_MINUTES = 10
-    PARTICIPATION_INEQUITY_THRESHOLD = 0.6
-    MAX_STATE_SIZE = 1000  # Max groups to track in memory
+    MAX_STATE_SIZE = 1000
     
     OFF_TOPIC_INTERVENTIONS = [
         "Tim, diskusi sepertinya mulai melenceng dari topik utama. Mari kita kembali fokus ke: {topic}",
@@ -85,19 +81,20 @@ class LogicListener:
     ]
     
     def __init__(self):
-        """Initialize LogicListener"""
         self.embedding_service = get_embedding_service()
         self.mongo_logger = get_mongo_logger()
-        
-        # State management with protection against memory leaks
+
+        self.off_topic_similarity_threshold = settings.LOGIC_LISTENER_OFF_TOPIC_SIMILARITY_THRESHOLD
+        self.off_topic_consecutive_threshold = settings.LOGIC_LISTENER_OFF_TOPIC_CONSECUTIVE_THRESHOLD
+        self.silence_threshold_minutes = settings.SILENCE_THRESHOLD_MINUTES
+        self.participation_inequity_threshold = settings.LOGIC_LISTENER_PARTICIPATION_INEQUITY_THRESHOLD
+
         self._off_topic_counter: Dict[str, int] = {}
         self._last_message_timestamp: Dict[str, float] = {}
         self._group_topics: Dict[str, str] = {}
         self._participation_counts: Dict[str, Dict[str, int]] = {}
-        
-        # Lock for thread-safe state operations
         self._state_lock = asyncio.Lock()
-        
+
         logger.info("LogicListener initialized with memory protection and concurrency safety")
 
     async def _cleanup_state_if_needed(self):
@@ -184,7 +181,7 @@ class LogicListener:
             
             # Update counter based on similarity (thread-safe)
             async with self._state_lock:
-                if similarity < self.OFF_TOPIC_SIMILARITY_THRESHOLD:
+                if similarity < self.off_topic_similarity_threshold:
                     self._off_topic_counter[group_id] = \
                         self._off_topic_counter.get(group_id, 0) + 1
                     
@@ -201,7 +198,7 @@ class LogicListener:
                 
                 # Check if intervention is needed
                 consecutive_count = self._off_topic_counter.get(group_id, 0)
-            should_intervene = consecutive_count >= self.OFF_TOPIC_CONSECUTIVE_THRESHOLD
+            should_intervene = consecutive_count >= self.off_topic_consecutive_threshold
             
             if should_intervene:
                 intervention_msg = self._get_off_topic_intervention(topic)
@@ -214,7 +211,7 @@ class LogicListener:
                     metadata={
                         "similarity": similarity,
                         "consecutive_count": consecutive_count,
-                        "threshold": self.OFF_TOPIC_SIMILARITY_THRESHOLD
+                        "threshold": self.off_topic_similarity_threshold
                     }
                 )
                 
@@ -276,10 +273,10 @@ class LogicListener:
             "silence_checked",
             group_id=group_id,
             idle_minutes=round(idle_time_minutes, 2),
-            threshold=self.SILENCE_THRESHOLD_MINUTES
+            threshold=self.silence_threshold_minutes
         )
         
-        if idle_time_minutes >= self.SILENCE_THRESHOLD_MINUTES:
+        if idle_time_minutes >= self.silence_threshold_minutes:
             intervention_msg = self._get_silence_intervention()
             
             # Use try/except or check loop to avoid crash in tests without event loop
@@ -291,7 +288,7 @@ class LogicListener:
                     reason=f"Silence detected: {round(idle_time_minutes, 2)} minutes",
                     metadata={
                         "idle_minutes": idle_time_minutes,
-                        "threshold": self.SILENCE_THRESHOLD_MINUTES
+                        "threshold": self.silence_threshold_minutes
                     }
                 ))
             except RuntimeError:
@@ -371,7 +368,7 @@ class LogicListener:
                         "gini_coefficient": gini,
                         "gini_norm": gini_norm,
                         "total_messages": total_messages,
-                        "threshold": self.PARTICIPATION_INEQUITY_THRESHOLD,
+                        "threshold": self.participation_inequity_threshold,
                         "distribution": participation,
                         "least_active_user": least_active_user
                     }
@@ -408,7 +405,7 @@ class LogicListener:
         
         for group_id, last_ts in self._last_message_timestamp.items():
             idle_minutes = (current_time - last_ts) / 60
-            if idle_minutes >= self.SILENCE_THRESHOLD_MINUTES:
+            if idle_minutes >= self.silence_threshold_minutes:
                 # To avoid spamming, we only return groups that haven't been processed
                 # This could be handled by checking when the last intervention was sent
                 silent_groups.append(group_id)
@@ -465,7 +462,7 @@ class LogicListener:
         if total_messages <= 10:
             return False
 
-        return self._calculate_normalized_gini(distribution) > 0.6
+        return self._calculate_normalized_gini(distribution) > self.participation_inequity_threshold
     
     def _get_off_topic_intervention(self, topic: str) -> str:
         """Get random off-topic message."""

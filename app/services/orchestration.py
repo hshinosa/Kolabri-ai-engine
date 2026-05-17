@@ -240,6 +240,23 @@ class Orchestrator:
             "missing_criteria": res.missing_criteria, "details": res.details, "success": True
         }
 
+    async def get_goal_refinement(self, current_goal: str, missing_criteria: List[str]) -> Dict[str, Any]:
+        from app.services.llm import get_llm_service
+        llm = get_llm_service()
+        try:
+            result = await llm.get_goal_refinement_suggestion(current_goal, missing_criteria)
+            return {
+                "success": True,
+                "refined_goal": result.content,
+                "explanation": f"Goal diperbaiki berdasarkan kriteria: {', '.join(missing_criteria)}",
+                "suggestions": missing_criteria,
+                "validation": {"is_valid": True, "score": 0.8},
+                "tokens_used": result.tokens_used,
+            }
+        except Exception as e:
+            logger.error("goal_refinement_failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
     # --- Private Helpers ---
 
     async def _track_message(self, group_id: str, user_id: str, message: str, analytics: EngagementAnalysis):
@@ -266,7 +283,7 @@ class Orchestrator:
         if quality_score < settings.NLP_QUALITY_ALERT_THRESHOLD: return True, "low_quality"
         
         status = self.logic_listener.get_group_status(group_id)
-        if status.get("participation_gini", 0) > settings.GINI_THRESHOLD: return True, "participation_inequity"
+        if status.get("participation_gini", 0) > settings.LOGIC_LISTENER_PARTICIPATION_INEQUITY_THRESHOLD: return True, "participation_inequity"
         
         return False, None
 
