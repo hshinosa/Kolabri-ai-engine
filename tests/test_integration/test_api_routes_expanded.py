@@ -298,7 +298,7 @@ class TestIngestEndpoint:
             files={"file": ("test.exe", b"data", "application/octet-stream")},
         )
         assert resp.status_code == 400
-        assert "Unsupported file type" in resp.json()["detail"]
+        assert "Unsupported file type" in resp.json()["message"]
 
     def test_file_size_exceeds_limit(self, client):
         """File exceeding MAX_UPLOAD_SIZE_MB (10 MB) is rejected."""
@@ -309,7 +309,7 @@ class TestIngestEndpoint:
             files={"file": ("big.pdf", big, "application/pdf")},
         )
         assert resp.status_code == 400
-        assert "File size exceeds" in resp.json()["detail"]
+        assert "File size exceeds" in resp.json()["message"]
 
     def test_response_fields(self, client):
         """Verify all IngestResponse fields are present and correct."""
@@ -378,7 +378,7 @@ class TestIngestEndpoint:
                         files={"file": ("test.pdf", b"data", "application/pdf")},
                     )
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
 
 # ###########################################################################
@@ -638,7 +638,7 @@ class TestGroupDashboardEndpoint:
             resp = client.get("/api/analytics/dashboard/group/g1")
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
 
 # ###########################################################################
@@ -732,7 +732,7 @@ class TestExportGroupActivityEndpoint:
             resp = client.get("/api/export/activity/group/grp1")
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
 
 # ###########################################################################
@@ -813,7 +813,7 @@ class TestExportProcessMiningEndpoint:
             resp = client.get("/api/export/process-mining/case/c1")
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
 
 # ###########################################################################
@@ -896,7 +896,7 @@ class TestGoalValidateEndpoint:
             )
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
     def test_missing_form_fields_returns_422(self, client):
         """All form fields (goal_text, user_id, chat_space_id) are required."""
@@ -944,7 +944,7 @@ class TestGoalRefineEndpoint:
             },
         )
         assert resp.status_code == 400
-        assert "Invalid JSON" in resp.json()["detail"]
+        assert "Invalid JSON" in resp.json()["message"]
 
     def test_orchestrator_error_returns_500(self, client):
         with patch("app.api.routes.goals.get_orchestrator") as m:
@@ -963,7 +963,7 @@ class TestGoalRefineEndpoint:
             )
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
     def test_missing_form_fields_returns_422(self, client):
         resp = client.post("/api/goals/refine", data={"current_goal": "Goal"})
@@ -1712,7 +1712,7 @@ class TestIngestEdgeCases:
             )
 
         assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
+        assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
 
 # ###########################################################################
@@ -1739,7 +1739,7 @@ class TestIngestBatchEdgeCases:
             )
 
         assert resp.status_code == 400
-        assert "No valid files" in resp.json()["detail"]
+        assert "No valid files" in resp.json()["message"]
 
     @pytest.mark.asyncio
     async def test_batch_skip_empty_filename(self):

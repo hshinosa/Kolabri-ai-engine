@@ -91,11 +91,11 @@ def test_global_handler_carries_terminal_outcome():
     async def _lifespan(_app: FastAPI):
         yield
 
-    from main import global_exception_handler
+    from app.core.error_handlers import unhandled_exception_handler
 
     app = FastAPI(lifespan=_lifespan)
     app.add_middleware(RequestIDMiddleware)
-    app.add_exception_handler(Exception, global_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
     @app.get("/boom")
     async def _boom():

@@ -183,80 +183,12 @@ app.include_router(api_router, prefix="/api", dependencies=[Depends(require_auth
 
 
 # ✅ SEC: KOL-145 - Exception Handlers for sanitized error responses
-def _request_id_for(request: Request) -> str:
-    rid = getattr(request.state, "request_id", None)
-    if rid:
-        return rid
-    import uuid as _uuid
-    return str(_uuid.uuid4())
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions with sanitized response."""
-    request_id = _request_id_for(request)
-    logger.error(
-        "Unhandled exception",
-        exc_info=exc,
-        path=request.url.path,
-        method=request.method,
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "INTERNAL_SERVER_ERROR",
-            "outcome": "terminal",
-            "message": "An internal error occurred. Please try again later.",
-            "request_id": request_id,
-        },
-        headers={REQUEST_ID_HEADER: request_id},
-    )
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions with sanitized response."""
-    request_id = _request_id_for(request)
-    logger.warning(
-        "HTTP exception",
-        status_code=exc.status_code,
-        detail=str(exc.detail),
-        path=request.url.path,
-    )
-    body: dict = {
-        "detail": "REQUEST_ERROR",
-        "message": str(exc.detail) if exc.status_code < 500 else "An error occurred",
-        "request_id": request_id,
-    }
-    if exc.status_code >= 500:
-        body["outcome"] = "terminal"
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=body,
-        headers={REQUEST_ID_HEADER: request_id},
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors with sanitized response."""
-    request_id = _request_id_for(request)
-    logger.warning(
-        "Validation error",
-        errors=str(exc.errors()),
-        path=request.url.path,
-    )
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": "VALIDATION_ERROR",
-            "message": "Invalid request data. Please check your input.",
-            "request_id": request_id,
-        },
-        headers={REQUEST_ID_HEADER: request_id},
-    )
+# Domain-specific handler kept here. Generic handlers live in app/core/error_handlers.py.
 
 @app.exception_handler(LLMDegradedError)
 async def llm_degraded_exception_handler(request: Request, exc: LLMDegradedError):
     """Map LLM degraded errors to HTTP 503 with structured outcome."""
+    from app.core.error_handlers import _request_id_for
     request_id = _request_id_for(request)
     logger.warning(
         "llm_degraded_outcome",
