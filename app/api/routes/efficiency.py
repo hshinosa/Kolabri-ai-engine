@@ -38,11 +38,9 @@ async def get_cache_statistics():
 
         return JSONResponse(content={"enabled": True, **stats})
 
-    except Exception as e:
-        logger.error("cache_statistics_api_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get cache statistics: {str(e)}"
-        )
+    except Exception:
+        logger.exception("cache_statistics_api_failed", error=str(e))
+        raise
 
 
 @router.get(
@@ -64,9 +62,9 @@ async def clear_cache():
             content={"success": True, "message": "Cache cleared successfully"}
         )
 
-    except Exception as e:
-        logger.error("cache_clear_api_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+    except Exception:
+        logger.exception("cache_clear_api_failed")
+        raise
 
 
 @router.get(
@@ -92,11 +90,9 @@ async def get_efficiency_statistics():
 
         return JSONResponse(content={"enabled": True, **stats})
 
-    except Exception as e:
-        logger.error("efficiency_statistics_api_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get efficiency statistics: {str(e)}"
-        )
+    except Exception:
+        logger.exception("efficiency_statistics_api_failed", error=str(e))
+        raise
 
 
 @router.get(
@@ -123,11 +119,9 @@ async def get_rate_limit_info(identifier: str):
 
         return JSONResponse(content={"enabled": True, **info})
 
-    except Exception as e:
-        logger.error("rate_limit_info_api_failed", error=str(e), identifier=identifier)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get rate limit info: {str(e)}"
-        )
+    except Exception:
+        logger.exception("rate_limit_info_api_failed", error=str(e), identifier=identifier)
+        raise
 
 
 @router.get(
@@ -151,8 +145,6 @@ async def get_high_frequency_queries(
 
         return JSONResponse(content={"enabled": True, "queries": queries})
 
-    except Exception as e:
-        logger.error("high_frequency_queries_api_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get high frequency queries: {str(e)}"
-        )
+    except Exception:
+        logger.exception("high_frequency_queries_api_failed", error=str(e))
+        raise

@@ -19,15 +19,6 @@ from app.api.routes.documents import (
     ingest_batch,
 )
 
-from app.services.rag import get_rag_pipeline
-from app.services.document_processor import get_document_processor
-from app.services.vector_store import get_vector_store
-from app.services.mongodb_logger import get_mongo_logger
-from app.services.logic_listener import get_logic_listener
-from app.services.llm import get_llm_service
-from app.services.intervention import get_intervention_service
-from app.services.orchestration import get_orchestrator
-
 router = APIRouter()
 router.include_router(_health_router)
 router.include_router(_track_activity_router)
@@ -43,14 +34,6 @@ router.include_router(_interventions_router)
 
 __all__ = [
     "router",
-    "get_rag_pipeline",
-    "get_document_processor",
-    "get_vector_store",
-    "get_mongo_logger",
-    "get_logic_listener",
-    "get_llm_service",
-    "get_intervention_service",
-    "get_orchestrator",
     "_process_ingest_background",
     "_process_batch_file_background",
     "ingest_document",

@@ -1757,17 +1757,14 @@ class TestOcrMethods:
     @pytest.mark.asyncio
     async def test_run_ocr_optimized_small_image(self, proc_ocr):
         """Small RGB image goes straight through without resize."""
-        proc_ocr._run_paddle_ocr = MagicMock(return_value="recognized")
-
         img = Image.new("RGB", (100, 100))
 
-        loop = asyncio.get_event_loop()
-
-        async def fake_exec(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_exec):
-            result = await proc_ocr._run_ocr_optimized(img)
+        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="recognized"):
+            loop = asyncio.get_event_loop()
+            async def fake_exec(pool, func):
+                return func()
+            with patch.object(loop, "run_in_executor", side_effect=fake_exec):
+                result = await proc_ocr._run_ocr_optimized(img)
 
         assert result == "recognized"
         img.close()
@@ -1775,37 +1772,30 @@ class TestOcrMethods:
     @pytest.mark.asyncio
     async def test_run_ocr_optimized_large_image_resized(self, proc_ocr):
         """Images larger than MAX_IMAGE_SIZE get thumbnailed."""
-        proc_ocr._run_paddle_ocr = MagicMock(return_value="resized-ocr")
-
         img = Image.new("RGB", (2000, 2000))
 
-        loop = asyncio.get_event_loop()
-
-        async def fake_exec(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_exec):
-            result = await proc_ocr._run_ocr_optimized(img)
+        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="resized-ocr"):
+            loop = asyncio.get_event_loop()
+            async def fake_exec(pool, func):
+                return func()
+            with patch.object(loop, "run_in_executor", side_effect=fake_exec):
+                result = await proc_ocr._run_ocr_optimized(img)
 
         assert result == "resized-ocr"
-        # Verify it was resized
         assert img.width <= proc_ocr.MAX_IMAGE_SIZE[0]
         img.close()
 
     @pytest.mark.asyncio
     async def test_run_ocr_optimized_non_rgb_converted(self, proc_ocr):
         """Non-RGB images are converted to RGB."""
-        proc_ocr._run_paddle_ocr = MagicMock(return_value="gray-ocr")
+        img = Image.new("L", (100, 100))
 
-        img = Image.new("L", (100, 100))  # Grayscale
-
-        loop = asyncio.get_event_loop()
-
-        async def fake_exec(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_exec):
-            result = await proc_ocr._run_ocr_optimized(img)
+        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="gray-ocr"):
+            loop = asyncio.get_event_loop()
+            async def fake_exec(pool, func):
+                return func()
+            with patch.object(loop, "run_in_executor", side_effect=fake_exec):
+                result = await proc_ocr._run_ocr_optimized(img)
 
         assert result == "gray-ocr"
 
@@ -1947,27 +1937,23 @@ class TestRunPageOcr:
 
     @pytest.mark.asyncio
     async def test_render_success(self, proc_ocr):
-        proc_ocr._run_ocr_optimized = AsyncMock(return_value="page ocr text")
-
-        # Mock the render_page function to return a PIL image
         fake_img = Image.new("RGB", (100, 100))
 
-        with patch("app.services.document_processor.fitz") as mock_fitz:
-            mock_fitz.Matrix.return_value = MagicMock()
-            page = MagicMock()
-            pix = MagicMock()
-            pix.width = 100
-            pix.height = 100
-            pix.samples = fake_img.tobytes()
-            page.get_pixmap.return_value = pix
+        with patch("app.services.document_processing.image_extraction.run_ocr_optimized", return_value="page ocr text"):
+            with patch("app.services.document_processor.fitz") as mock_fitz:
+                mock_fitz.Matrix.return_value = MagicMock()
+                page = MagicMock()
+                pix = MagicMock()
+                pix.width = 100
+                pix.height = 100
+                pix.samples = fake_img.tobytes()
+                page.get_pixmap.return_value = pix
 
-            loop = asyncio.get_event_loop()
-
-            async def fake_exec(pool, func):
-                return func()
-
-            with patch.object(loop, "run_in_executor", side_effect=fake_exec):
-                result = await proc_ocr._run_page_ocr(page)
+                loop = asyncio.get_event_loop()
+                async def fake_exec(pool, func):
+                    return func()
+                with patch.object(loop, "run_in_executor", side_effect=fake_exec):
+                    result = await proc_ocr._run_page_ocr(page)
 
         assert result == "page ocr text"
 
@@ -2009,13 +1995,13 @@ class TestInitializeOcrEngine:
 
     def test_successful_init(self, proc):
         proc._ocr_engine = None
-        mock_paddle = MagicMock()
+        mock_engine = MagicMock()
         with (
             patch("app.services.document_processor.OCR_AVAILABLE", True),
-            patch("app.services.document_processor.PaddleOCR", mock_paddle),
+            patch("app.services.document_processing.image_extraction.initialize_ocr_engine", return_value=mock_engine),
         ):
             proc._initialize_ocr_engine()
-        assert proc._ocr_engine is not None
+        assert proc._ocr_engine is mock_engine
 
     def test_init_exception(self, proc):
         proc._ocr_engine = None
@@ -2476,10 +2462,7 @@ class TestUncoveredLines:
     @pytest.mark.asyncio
     async def test_process_image_finally_cleanup_when_img_none(self, proc_vision):
         """Cover _process_image finally when img is None (Image.open fails early)."""
-        proc_vision._generate_image_caption = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
-        with patch("app.services.document_processor.Image") as mock_img_mod:
+        with patch("app.services.document_processing.image_extraction.Image") as mock_img_mod:
             mock_img_mod.open.side_effect = RuntimeError("bad image data")
             with pytest.raises(RuntimeError, match="bad image data"):
                 await proc_vision._process_image(b"bad", "img.jpg", "d")
@@ -2641,17 +2624,13 @@ class TestEdgeCaseBranches:
     def test_initialize_ocr_no_language_setting(self, proc):
         """Cover getattr(settings, 'OCR_LANGUAGE', None) returning None."""
         proc._ocr_engine = None
-        mock_paddle = MagicMock()
+        mock_engine = MagicMock()
         with (
             patch("app.services.document_processor.OCR_AVAILABLE", True),
-            patch("app.services.document_processor.PaddleOCR", mock_paddle),
-            patch("app.services.document_processor.settings") as ms,
+            patch("app.services.document_processing.image_extraction.initialize_ocr_engine", return_value=mock_engine),
         ):
-            # Make OCR_LANGUAGE absent → getattr returns None → defaults to "en"
-            del ms.OCR_LANGUAGE
-            type(ms).OCR_LANGUAGE = PropertyMock(side_effect=AttributeError("no attr"))
             proc._initialize_ocr_engine()
-        assert proc._ocr_engine is not None
+        assert proc._ocr_engine is mock_engine
 
     @pytest.mark.asyncio
     async def test_generate_caption_rgb_image_no_conversion(self, proc_vision):

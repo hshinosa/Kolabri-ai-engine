@@ -5,7 +5,7 @@ Analytics, dashboard & CSV export endpoints.
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import JSONResponse, Response
 
 from app.core.logging import get_logger
@@ -22,6 +22,15 @@ from app.services.orchestration import get_orchestrator
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+_SAFE_ID_REGEX = r"^[a-zA-Z0-9_-]{1,64}$"
+
+
+def _safe_csv_filename(prefix: str, identifier: str) -> str:
+    from urllib.parse import quote
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_id = quote(identifier, safe='')
+    return f"{prefix}_{safe_id}_{timestamp}.csv"
 
 
 @router.post(
@@ -70,9 +79,9 @@ async def get_group_dashboard(group_id: str):
         orchestrator = get_orchestrator()
         data = await orchestrator.get_group_dashboard_data(group_id)
         return JSONResponse(content=data)
-    except Exception as e:
-        logger.error("group_dashboard_api_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("group_dashboard_api_failed")
+        raise
 
 
 @router.get(
@@ -85,9 +94,9 @@ async def get_individual_dashboard(user_id: str):
         orchestrator = get_orchestrator()
         data = await orchestrator.get_individual_dashboard_data(user_id)
         return JSONResponse(content=data)
-    except Exception as e:
-        logger.error("individual_dashboard_api_failed", user_id=user_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("individual_dashboard_api_failed")
+        raise
 
 
 @router.get(
@@ -104,12 +113,14 @@ async def get_dashboard_data_legacy(group_id: str):
     tags=["Analytics"],
     summary="Export group activity data to CSV (Student Breakdown)",
 )
-async def export_group_activity_csv(group_id: str):
+async def export_group_activity_csv(
+    group_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric group identifier"),
+):
     try:
         export_service = get_export_service()
         csv_data = await export_service.export_group_activity_detailed(group_id)
 
-        filename = f"student_breakdown_{group_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = _safe_csv_filename("student_breakdown", group_id)
 
         return Response(
             content=csv_data,
@@ -119,9 +130,7 @@ async def export_group_activity_csv(group_id: str):
 
     except Exception as e:
         logger.error("csv_export_failed", group_id=group_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to export activity data: {str(e)}"
-        )
+        raise
 
 
 @router.get(
@@ -130,7 +139,7 @@ async def export_group_activity_csv(group_id: str):
     summary="Export chat space activity data to CSV",
 )
 async def export_chat_space_activity_csv(
-    chat_space_id: str,
+    chat_space_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric chat space identifier"),
     include_detailed: bool = Query(True, description="Include detailed metrics"),
 ):
     try:
@@ -140,7 +149,7 @@ async def export_chat_space_activity_csv(
             chat_space_id=chat_space_id, include_detailed=include_detailed
         )
 
-        filename = f"activity_session_{chat_space_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = _safe_csv_filename("activity_session", chat_space_id)
 
         logger.info(
             "activity_csv_exported",
@@ -157,9 +166,7 @@ async def export_chat_space_activity_csv(
 
     except Exception as e:
         logger.error("csv_export_failed", chat_space_id=chat_space_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to export activity data: {str(e)}"
-        )
+        raise
 
 
 @router.get(
@@ -167,16 +174,16 @@ async def export_chat_space_activity_csv(
     tags=["Analytics"],
     summary="Export raw event logs to CSV for Process Mining (XES compatible)",
 )
-async def export_process_mining_csv(case_id: str):
+async def export_process_mining_csv(
+    case_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric case identifier"),
+):
     try:
         from app.services.mongodb_logger import get_mongo_logger as _get_mongo
         mongo_logger = _get_mongo()
 
         csv_data = await mongo_logger.export_to_csv(case_id=case_id)
 
-        filename = (
-            f"process_mining_{case_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        )
+        filename = _safe_csv_filename("process_mining", case_id)
 
         logger.info(
             "process_mining_csv_exported", case_id=case_id, size_bytes=len(csv_data)
@@ -190,9 +197,7 @@ async def export_process_mining_csv(case_id: str):
 
     except Exception as e:
         logger.error("process_mining_export_failed", case_id=case_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to export process mining data: {str(e)}"
-        )
+        raise
 
 
 @router.get(

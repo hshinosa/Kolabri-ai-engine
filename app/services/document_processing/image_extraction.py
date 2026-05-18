@@ -13,6 +13,8 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
+from app.services.document_processing.models import ProcessedDocument, ProcessedChunk
+
 OCR_IMPORT_ERROR: Optional[str] = None
 try:
     from paddleocr import PaddleOCR
@@ -247,7 +249,6 @@ async def process_image(
     caption_fn=None,
     create_chunks_fn=None,
 ):
-    from app.services.document_processor import ProcessedDocument, ProcessedChunk
 
     if not vision_available:
         return ProcessedDocument(

@@ -38,12 +38,24 @@ def integration_app():
         yield
 
     from app.api.routes import router as api_router
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from app.core.error_handlers import (
+        http_exception_handler,
+        validation_exception_handler,
+        unhandled_exception_handler,
+        ExceptionMiddleware,
+    )
 
     app = FastAPI(
         title="Kolabri AI-Engine (Expanded Tests)",
         version="1.0.0",
         lifespan=mock_lifespan,
     )
+
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_middleware(ExceptionMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
@@ -296,7 +308,7 @@ class TestIngestEndpoint:
             files={"file": ("big.pdf", big, "application/pdf")},
         )
         assert resp.status_code == 400
-        assert "size" in resp.json()["detail"].lower()
+        assert "File size exceeds" in resp.json()["detail"]
 
     def test_response_fields(self, client):
         """Verify all IngestResponse fields are present and correct."""
@@ -365,7 +377,7 @@ class TestIngestEndpoint:
                         files={"file": ("test.pdf", b"data", "application/pdf")},
                     )
         assert resp.status_code == 500
-        assert "Failed to save uploaded file" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ###########################################################################
@@ -624,7 +636,7 @@ class TestGroupDashboardEndpoint:
             resp = client.get("/api/analytics/dashboard/group/g1")
 
         assert resp.status_code == 500
-        assert "DB timeout" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ###########################################################################
@@ -718,7 +730,7 @@ class TestExportGroupActivityEndpoint:
             resp = client.get("/api/export/activity/group/grp1")
 
         assert resp.status_code == 500
-        assert "Failed to export" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ###########################################################################
@@ -799,7 +811,7 @@ class TestExportProcessMiningEndpoint:
             resp = client.get("/api/export/process-mining/case/c1")
 
         assert resp.status_code == 500
-        assert "Failed to export process mining" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ###########################################################################
@@ -882,7 +894,7 @@ class TestGoalValidateEndpoint:
             )
 
         assert resp.status_code == 500
-        assert "Failed to validate goal" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
     def test_missing_form_fields_returns_422(self, client):
         """All form fields (goal_text, user_id, chat_space_id) are required."""
@@ -949,7 +961,7 @@ class TestGoalRefineEndpoint:
             )
 
         assert resp.status_code == 500
-        assert "Failed to get refinement" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
     def test_missing_form_fields_returns_422(self, client):
         resp = client.post("/api/goals/refine", data={"current_goal": "Goal"})
@@ -1698,7 +1710,7 @@ class TestIngestEdgeCases:
             )
 
         assert resp.status_code == 500
-        assert "Failed to save uploaded file" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 # ###########################################################################

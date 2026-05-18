@@ -13,6 +13,7 @@ from PIL import Image
 
 from app.core.logging import get_logger
 from app.services.document_processing.chunking import create_chunks as _create_chunks, ChunkSpec
+from app.services.document_processing.models import ProcessedDocument, ProcessedChunk
 
 logger = get_logger(__name__)
 
@@ -33,8 +34,7 @@ def _extract_images_from_docx(doc_content: bytes):
         logger.warning("docx_extract_media_failed", error=str(e))
 
 
-def _chunks_to_processed(chunks: List[ChunkSpec], from_mod):
-    ProcessedChunk = from_mod.ProcessedChunk
+def _chunks_to_processed(chunks: List[ChunkSpec]) -> List[ProcessedChunk]:
     return [
         ProcessedChunk(text=c.text, metadata=c.metadata, chunk_id=c.chunk_id)
         for c in chunks
@@ -64,7 +64,6 @@ async def process_pdf(
     if fitz is None:
         import fitz as _f
         fitz = _f
-    from app.services.document_processor import ProcessedDocument, ProcessedChunk
 
     chunks: List[ProcessedChunk] = []
     all_text = []
@@ -149,7 +148,7 @@ async def process_pdf(
                 chunk_overlap=chunk_overlap,
                 metadata=metadata,
             )
-            chunks.extend(_chunks_to_processed(specs, type("", (), {"ProcessedChunk": ProcessedChunk})))
+            chunks.extend(_chunks_to_processed(specs))
 
     pdf_doc.close()
     gc.collect()
@@ -182,7 +181,6 @@ async def process_docx(
     DocxDocument = _DocxDocument
     if DocxDocument is None:
         from docx import Document as DocxDocument
-    from app.services.document_processor import ProcessedDocument, ProcessedChunk
 
     extract_fn = _extract_images_fn or _extract_images_from_docx
 
@@ -236,7 +234,7 @@ async def process_docx(
         chunk_overlap=chunk_overlap,
         metadata=metadata,
     )
-    chunks = _chunks_to_processed(specs, type("", (), {"ProcessedChunk": ProcessedChunk}))
+    chunks = _chunks_to_processed(specs)
 
     return ProcessedDocument(
         filename=filename,
@@ -265,7 +263,6 @@ async def process_pptx(
     Presentation = _Presentation
     if Presentation is None:
         from pptx import Presentation
-    from app.services.document_processor import ProcessedDocument, ProcessedChunk
 
     prs = Presentation(io.BytesIO(content))
 
@@ -318,7 +315,7 @@ async def process_pptx(
                 chunk_overlap=chunk_overlap,
                 metadata={**(metadata or {}), "slide_number": slide_num},
             )
-            chunks.extend(_chunks_to_processed(slide_specs, type("", (), {"ProcessedChunk": ProcessedChunk})))
+            chunks.extend(_chunks_to_processed(slide_specs))
 
     return ProcessedDocument(
         filename=filename,
@@ -342,7 +339,6 @@ async def process_text(
     chunk_size: int,
     chunk_overlap: int,
 ):
-    from app.services.document_processor import ProcessedDocument, ProcessedChunk
 
     text = None
     for encoding in ["utf-8", "utf-16", "latin-1", "cp1252"]:
@@ -364,7 +360,7 @@ async def process_text(
         chunk_overlap=chunk_overlap,
         metadata=metadata,
     )
-    chunks = _chunks_to_processed(specs, type("", (), {"ProcessedChunk": ProcessedChunk}))
+    chunks = _chunks_to_processed(specs)
 
     return ProcessedDocument(
         filename=filename,

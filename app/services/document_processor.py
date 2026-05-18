@@ -31,6 +31,8 @@ from datetime import datetime
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
+from app.services.document_processing.models import ProcessedDocument, ProcessedChunk
+
 # Multimodal / Vision
 VISION_AVAILABLE = False
 genai = None
@@ -70,30 +72,6 @@ logger = get_logger(__name__)
 
 # Thread pool for CPU-bound tasks
 _thread_pool = ThreadPoolExecutor(max_workers=2)
-
-
-@dataclass
-class ProcessedChunk:
-    """A processed text chunk ready for embedding."""
-
-    text: str
-    metadata: Dict[str, Any]
-    chunk_id: str
-
-
-@dataclass
-class ProcessedDocument:
-    """Result of processing a single document."""
-
-    filename: str
-    file_type: str
-    chunks: List[ProcessedChunk]
-    page_count: int
-    image_count: int
-    total_characters: int
-    processing_time_ms: float
-    success: bool
-    error: Optional[str] = None
 
 
 @dataclass
@@ -754,84 +732,24 @@ class DocumentProcessor:
         document_id: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
-        if not self.vision_available:
-            return ProcessedDocument(
-                filename=filename, file_type="image", chunks=[], page_count=0,
-                image_count=0, total_characters=0, processing_time_ms=0,
-                success=False, error="Multimodal/Vision processing is disabled or unavailable",
-            )
-        img = None
-        try:
-            img = Image.open(io.BytesIO(content))
-            caption = await self._generate_image_caption(img)
-            if not caption:
-                raise ValueError("Vision AI failed to generate caption for image")
-            full_text = f"=== [GAMBAR: {filename}] ===\nDeskripsi Visual: {caption}\n========================"
-            chunks = self._create_chunks(
-                text=full_text, document_id=document_id, filename=filename,
-                page_number=1, metadata={**(metadata or {}), "is_multimodal": True},
-            )
-            return ProcessedDocument(
-                filename=filename, file_type="image", chunks=chunks, page_count=1,
-                image_count=1, total_characters=len(full_text), processing_time_ms=0, success=True,
-            )
-        except Exception as e:
-            logger.error("image_processing_failed", filename=filename, error=str(e))
-            raise
-        finally:
-            if img is not None:
-                img.close()
-                del img
-            gc.collect()
+        from app.services.document_processing import image_extraction
+        return await image_extraction.process_image(
+            content=content,
+            filename=filename,
+            document_id=document_id,
+            metadata=metadata,
+            vision_available=self.vision_available,
+            caption_fn=self._generate_image_caption,
+            create_chunks_fn=self._create_chunks,
+        )
 
     async def _generate_image_caption(self, image: Image.Image) -> str:
-        if not self._vision_model and not self._vision_client:
-            return ""
-        try:
-            prompt = (
-                "Analisis gambar ini secara detail untuk keperluan materi kuliah.\n"
-                "1. Jika ini DIAGRAM/SKEMA: Jelaskan alur dan komponennya.\n"
-                "2. Jika ini GRAFIK: Jelaskan sumbu X/Y, tren, dan titik penting.\n"
-                "3. Jika ini RUMUS: Tuliskan dalam format LaTeX.\n"
-                "4. Abaikan jika gambar buram atau tidak bermakna.\n\n"
-                "Outputkan hanya deskripsinya saja dalam Bahasa Indonesia."
-            )
-            img_buffer = io.BytesIO()
-            prepared_image = image.convert("RGB") if image.mode != "RGB" else image
-            prepared_image.save(img_buffer, format="JPEG", quality=85)
-            img_bytes = img_buffer.getvalue()
-            img_buffer.close()
-            loop = asyncio.get_running_loop()
-            if self._vision_model:
-                response = await loop.run_in_executor(
-                    _thread_pool,
-                    lambda: self._vision_model.generate_content([prompt, prepared_image]),
-                )
-                if prepared_image is not image:
-                    prepared_image.close()
-                return getattr(response, "text", "").strip()
-            import base64
-            base64_image = base64.b64encode(img_bytes).decode("utf-8")
-            response = await loop.run_in_executor(
-                _thread_pool,
-                lambda: self._vision_client.chat.completions.create(
-                    model=settings.GEMINI_VISION_MODEL,
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                        ],
-                    }],
-                    max_tokens=500,
-                ),
-            )
-            if prepared_image is not image:
-                prepared_image.close()
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.warning("vision_api_failed", error=str(e))
-            return ""
+        from app.services.document_processing import image_extraction
+        return await image_extraction.generate_image_caption(
+            image,
+            vision_model=self._vision_model,
+            vision_client=self._vision_client,
+        )
 
     def _extract_images_from_docx(self, doc_content: bytes):
         from app.services.document_processing.text_extraction import _extract_images_from_docx
@@ -853,15 +771,11 @@ class DocumentProcessor:
     def _initialize_ocr_engine(self) -> None:
         if self._ocr_engine is not None or not OCR_AVAILABLE:
             return
-        try:
-            lang = getattr(settings, "OCR_LANGUAGE", None) or "en"
-            self._ocr_engine = PaddleOCR(use_angle_cls=True, lang=lang)
-            logging.getLogger("ppocr").setLevel(logging.ERROR)
-            logger.info("PaddleOCR initialized", lang=lang)
-        except Exception as exc:
-            self._ocr_engine = None
+        from app.services.document_processing import image_extraction
+        engine = image_extraction.initialize_ocr_engine()
+        if engine is None:
             self.ocr_available = False
-            logger.error("Failed to initialize PaddleOCR", error=str(exc))
+        self._ocr_engine = engine
 
     async def _run_ocr(self, image: Image.Image) -> str:
         return await self._run_ocr_optimized(image)
@@ -869,77 +783,26 @@ class DocumentProcessor:
     def _run_paddle_ocr(self, image: Image.Image) -> str:
         if not self._ocr_engine:
             self._initialize_ocr_engine()
-        engine = self._ocr_engine
-        if engine is None:
-            return ""
-        try:
-            np_image = np.array(image)
-            result = engine.ocr(np_image, cls=True)
-        except Exception as exc:
-            logger.debug("ocr_failed", error=str(exc))
-            return ""
-        finally:
-            try:
-                del np_image
-            except NameError:
-                pass
-        if not result:
-            return ""
-        lines = []
-        for line in result:
-            for _, (text, confidence) in line:
-                if not text:
-                    continue
-                if confidence is not None and confidence < 0.4:
-                    continue
-                lines.append(text.strip())
-        return "\n".join(lines).strip()
+        from app.services.document_processing import image_extraction
+        return image_extraction.run_paddle_ocr(image, self._ocr_engine)
 
     async def _run_ocr_optimized(self, image: Image.Image) -> str:
-        if not self.ocr_available:
-            return ""
-        try:
-            if (
-                image.width > self.MAX_IMAGE_SIZE[0]
-                or image.height > self.MAX_IMAGE_SIZE[1]
-            ):
-                image.thumbnail(self.MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
-            original_image = image
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-                original_image.close()
-                del original_image
-            loop = asyncio.get_running_loop()
-            text = await loop.run_in_executor(
-                _thread_pool, lambda: self._run_paddle_ocr(image)
-            )
-            return text.strip()
-        except Exception as e:
-            logger.debug("ocr_failed", error=str(e))
-            return ""
+        from app.services.document_processing import image_extraction
+        return await image_extraction.run_ocr_optimized(
+            image,
+            ocr_available=self.ocr_available,
+            ocr_engine=self._ocr_engine,
+            max_image_size=self.MAX_IMAGE_SIZE,
+        )
 
     async def _run_page_ocr(self, page: fitz.Page) -> str:
-        if not self.ocr_available:
-            return ""
-        def render_page() -> Optional[Image.Image]:
-            try:
-                matrix = fitz.Matrix(1.5, 1.5)
-                pix = page.get_pixmap(matrix=matrix, alpha=False)
-                image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                pix = None
-                return image
-            except Exception as exc:
-                logger.debug("page_render_failed", error=str(exc))
-                return None
-        loop = asyncio.get_running_loop()
-        image = await loop.run_in_executor(_thread_pool, render_page)
-        if image is None:
-            return ""
-        try:
-            text = await self._run_ocr_optimized(image)
-            return text
-        finally:
-            del image
+        from app.services.document_processing import image_extraction
+        return await image_extraction.run_page_ocr(
+            page,
+            ocr_available=self.ocr_available,
+            ocr_engine=self._ocr_engine,
+            max_image_size=self.MAX_IMAGE_SIZE,
+        )
 
     def _create_chunks(
         self,

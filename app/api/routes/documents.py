@@ -213,9 +213,7 @@ async def ingest_document(
             os.unlink(tmp_path)
         except OSError:
             pass
-        raise HTTPException(
-            status_code=500, detail=f"Failed to save uploaded file: {str(e)}"
-        )
+        raise
 
     original_filename = file.filename
     background_tasks.add_task(
@@ -346,6 +344,6 @@ async def delete_document(
             }
         )
 
-    except Exception as e:
-        logger.error("document_delete_failed", error=str(e), document_id=document_id)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("document_delete_failed")
+        raise

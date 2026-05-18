@@ -40,11 +40,9 @@ async def validate_goal(
 
         return JSONResponse(content=result)
 
-    except Exception as e:
-        logger.error("goal_validation_api_failed", error=str(e), user_id=user_id)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to validate goal: {str(e)}"
-        )
+    except Exception:
+        logger.exception("goal_validation_api_failed", error=str(e), user_id=user_id)
+        raise
 
 
 @router.post(
@@ -78,8 +76,6 @@ async def get_goal_refinement(
         raise HTTPException(
             status_code=400, detail="Invalid JSON format for missing_criteria"
         )
-    except Exception as e:
-        logger.error("goal_refinement_api_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get refinement: {str(e)}"
-        )
+    except Exception:
+        logger.exception("goal_refinement_api_failed", error=str(e))
+        raise

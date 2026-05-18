@@ -1,3 +1,7 @@
+from app.services.document_processing.models import (
+    ProcessedChunk,
+    ProcessedDocument,
+)
 from app.services.document_processing.chunking import (
     ChunkSpec,
     clean_text,
@@ -18,6 +22,7 @@ from app.services.document_processing.image_extraction import (
 )
 
 __all__ = [
+    "ProcessedChunk", "ProcessedDocument",
     "ChunkSpec", "clean_text", "create_chunks",
     "process_pdf", "process_docx", "process_pptx", "process_text",
     "process_image", "generate_image_caption", "run_ocr", "run_ocr_optimized",

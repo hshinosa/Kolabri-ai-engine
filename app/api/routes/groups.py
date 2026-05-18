@@ -39,9 +39,7 @@ async def check_group_status(
 
     except Exception as e:
         logger.error("group_status_check_api_failed", error=str(e), group_id=group_id)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to check group status: {str(e)}"
-        )
+        raise
 
 
 @router.post(
@@ -68,9 +66,7 @@ async def track_participation(group_id: str, user_id: str = Form(...)):
             group_id=group_id,
             user_id=user_id,
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to track participation: {str(e)}"
-        )
+        raise
 
 
 @router.post(
@@ -92,9 +88,7 @@ async def update_last_message_time(group_id: str):
         logger.error(
             "last_message_time_update_api_failed", error=str(e), group_id=group_id
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update last message time: {str(e)}"
-        )
+        raise
 
 
 @router.post(
@@ -116,6 +110,4 @@ async def set_group_topic(group_id: str, topic: str = Form(...)):
         logger.error(
             "group_topic_set_api_failed", error=str(e), group_id=group_id, topic=topic
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to set group topic: {str(e)}"
-        )
+        raise

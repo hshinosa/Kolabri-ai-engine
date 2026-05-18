@@ -28,9 +28,9 @@ async def metrics():
             content=monitor.get_metrics(),
             media_type=monitor.get_content_type()
         )
-    except Exception as e:
-        logger.error("metrics_endpoint_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Metrics export failed: {str(e)}")
+    except Exception:
+        logger.exception("metrics_endpoint_failed")
+        raise
 
 
 @router.get("/health/monitoring", tags=["Monitoring"])
@@ -39,9 +39,9 @@ async def get_monitoring_status():
     try:
         monitor = get_monitor()
         return JSONResponse(content=monitor.get_dashboard_data())
-    except Exception as e:
-        logger.error("monitoring_status_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to get monitoring status: {str(e)}")
+    except Exception:
+        logger.exception("monitoring_status_failed")
+        raise
 
 
 @router.get("/health/circuit-breakers", tags=["Monitoring"])
@@ -52,9 +52,9 @@ async def get_circuit_breaker_status():
         return JSONResponse(content={
             "llm_service": llm_cb.get_metrics()
         })
-    except Exception as e:
-        logger.error("circuit_breaker_status_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to get circuit breaker status: {str(e)}")
+    except Exception:
+        logger.exception("circuit_breaker_status_failed")
+        raise
 
 
 @router.get("/health/reranker", tags=["Monitoring"])
@@ -63,6 +63,6 @@ async def get_reranker_status():
     try:
         reranker = get_reranker()
         return JSONResponse(content=reranker.get_metrics())
-    except Exception as e:
-        logger.error("reranker_status_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to get reranker status: {str(e)}")
+    except Exception:
+        logger.exception("reranker_status_failed")
+        raise
