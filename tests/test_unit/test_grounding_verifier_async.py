@@ -136,7 +136,9 @@ async def test_verify_grounding_async_honors_custom_thresholds_for_partial_groun
     verifier = GroundingVerifier(embedding_service=MagicMock())
     documents = [{"content": "doc"}]
 
-    with patch.object(verifier, "_extract_claims", return_value=["claim-1", "claim-2"]), patch.object(
+    with patch.object(verifier, "_extract_claims", return_value=["claim-1", "claim-2"]), \
+         patch.object(verifier, "_compute_similarity", return_value=0.5), \
+         patch.object(
         verifier,
         "_compute_similarity_async",
         new=AsyncMock(side_effect=[0.7, 0.2]),
@@ -158,7 +160,9 @@ async def test_verify_grounding_async_honors_custom_thresholds_for_partial_groun
 async def test_verify_grounding_async_confidence_is_capped_at_one():
     verifier = GroundingVerifier(embedding_service=MagicMock())
 
-    with patch.object(verifier, "_extract_claims", return_value=["claim"]), patch.object(
+    with patch.object(verifier, "_extract_claims", return_value=["claim"]), \
+         patch.object(verifier, "_compute_similarity", return_value=1.0), \
+         patch.object(
         verifier,
         "_compute_similarity_async",
         new=AsyncMock(return_value=1.0),
@@ -173,7 +177,9 @@ async def test_verify_grounding_async_uses_max_similarity_across_documents():
     verifier = GroundingVerifier(embedding_service=MagicMock())
     documents = [{"content": "doc-1"}, {"content": "doc-2"}, {"content": "doc-3"}]
 
-    with patch.object(verifier, "_extract_claims", return_value=["claim"]), patch.object(
+    with patch.object(verifier, "_extract_claims", return_value=["claim"]), \
+         patch.object(verifier, "_compute_similarity", return_value=0.8), \
+         patch.object(
         verifier,
         "_compute_similarity_async",
         new=AsyncMock(side_effect=[0.1, 0.81, 0.3]),

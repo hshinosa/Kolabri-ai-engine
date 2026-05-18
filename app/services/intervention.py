@@ -10,6 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.prompt_styles import GROUP_INTERVENTION_STYLE
 from app.services.llm import OpenAILLMService, get_llm_service
@@ -51,14 +52,17 @@ class ChatInterventionService:
     - Track intervention effectiveness (future)
     """
 
-    # Thresholds for intervention triggers
-    OFF_TOPIC_THRESHOLD = 0.6
-    INACTIVITY_THRESHOLD_MINUTES = 30
-    MINIMUM_MESSAGES_FOR_SUMMARY = 10
-
     def __init__(self, llm_service: Optional[OpenAILLMService] = None):
         """Initialize intervention service."""
         self.llm_service = llm_service or get_llm_service()
+        self.off_topic_threshold = settings.INTERVENTION_OFF_TOPIC_THRESHOLD
+        self.inactivity_threshold_minutes = settings.INTERVENTION_INACTIVITY_THRESHOLD_MINUTES
+        self.minimum_messages_for_summary = settings.INTERVENTION_MINIMUM_MESSAGES_FOR_SUMMARY
+        self.prompt_temperature = settings.INTERVENTION_PROMPT_TEMPERATURE
+        self.confidence_off_topic = settings.INTERVENTION_CONFIDENCE_OFF_TOPIC
+        self.confidence_inactivity = settings.INTERVENTION_CONFIDENCE_INACTIVITY
+        self.confidence_summarize = settings.INTERVENTION_CONFIDENCE_SUMMARIZE
+        self.confidence_prompt = settings.INTERVENTION_CONFIDENCE_PROMPT
         logger.info("chat_intervention_service_initialized")
 
     async def analyze_and_intervene(
@@ -163,13 +167,13 @@ class ChatInterventionService:
         Returns:
             InterventionResult with summary
         """
-        if len(messages) < self.MINIMUM_MESSAGES_FOR_SUMMARY:
+        if len(messages) < self.minimum_messages_for_summary:
             return InterventionResult(
                 message="Belum cukup pesan untuk membuat ringkasan.",
                 intervention_type=InterventionType.SUMMARIZE,
                 confidence=1.0,
                 should_intervene=False,
-                reason=f"Need at least {self.MINIMUM_MESSAGES_FOR_SUMMARY} messages",
+                reason=f"Need at least {self.minimum_messages_for_summary} messages",
                 success=True,
             )
 
@@ -240,7 +244,7 @@ Buatkan 1-2 pertanyaan yang:
                 prompt=prompt,
                 system_prompt="""Anda adalah fasilitator diskusi akademik Kolabri.
 Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENTION_STYLE,
-                temperature=0.8,  # More creative for prompts
+                temperature=self.prompt_temperature,
             )
 
             if not llm_response.success:
@@ -303,12 +307,12 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
                 minutes_since = (
                     datetime.now(last_message_time.tzinfo) - last_message_time
                 ).total_seconds() / 60
-                if minutes_since > self.INACTIVITY_THRESHOLD_MINUTES:
+                if minutes_since > self.inactivity_threshold_minutes:
                     triggers["inactive"] = True
                     triggers["should_intervene"] = True
 
         # Check if enough messages for summary
-        if len(messages) >= self.MINIMUM_MESSAGES_FOR_SUMMARY:
+        if len(messages) >= self.minimum_messages_for_summary:
             # Check if no recent summary
             if last_intervention_time:
                 messages_since_intervention = [
@@ -320,7 +324,7 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
                 ]
                 if (
                     len(messages_since_intervention)
-                    >= self.MINIMUM_MESSAGES_FOR_SUMMARY
+                    >= self.minimum_messages_for_summary
                 ):
                     triggers["needs_summary"] = True
 
@@ -348,18 +352,18 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
         if triggers.get("off_topic"):
             return (
                 InterventionType.REDIRECT,
-                triggers.get("off_topic_score", 0.5),
+                triggers.get("off_topic_score", self.confidence_off_topic),
                 "Discussion appears off-topic",
             )
 
         if triggers.get("inactive"):
-            return (InterventionType.ENCOURAGE, 0.8, "Chat has been inactive")
+            return (InterventionType.ENCOURAGE, self.confidence_inactivity, "Chat has been inactive")
 
         if triggers.get("needs_summary"):
-            return (InterventionType.SUMMARIZE, 0.7, "Enough messages for summary")
+            return (InterventionType.SUMMARIZE, self.confidence_summarize, "Enough messages for summary")
 
         if triggers.get("low_engagement"):
-            return (InterventionType.PROMPT, 0.6, "Low engagement detected")
+            return (InterventionType.PROMPT, self.confidence_prompt, "Low engagement detected")
 
         return (InterventionType.ENCOURAGE, 0.0, "No intervention needed")
 

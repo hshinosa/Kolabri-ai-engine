@@ -14,7 +14,7 @@
 - [x] 2.3 Update `/api/health` endpoint di `app/api/routes.py` untuk menyertakan status reranker aktual dari `get_reranker().enabled`
 - [x] 2.4 Tambah startup log di `app/services/reranker.py` yang mencatat `enabled` state dan alasannya
 - [x] 2.5 Tambah catatan reranker ke `README.md` (dependency `sentence-transformers`, auto-download model)
-- [ ] 2.6 Verifikasi via `curl http://localhost:8001/api/health` — membutuhkan service running, skip (verifikasi manual saat deploy)
+- [x] 2.6 Verifikasi via `curl http://localhost:8001/api/health` — diverifikasi via `scripts/verify_track_activity_and_health.py` (FastAPI TestClient, mock lifespan): GET `/api/health` 200 dengan body berisi `reranker_enabled` field, dan nilainya == `get_reranker().enabled` runtime (di environment ini `False` karena `sentence-transformers` tidak terinstall — sesuai catatan README)
 
 ## 3. RAG Evaluation Dataset
 

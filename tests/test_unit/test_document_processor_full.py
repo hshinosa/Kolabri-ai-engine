@@ -119,8 +119,10 @@ def _large_png_bytes(width=300, height=300) -> bytes:
 
 @pytest.fixture(autouse=True)
 def _patch_pil_image():
-    """Ensure document_processor uses our fake PIL Image module."""
-    with patch("app.services.document_processor.Image", Image):
+    """Ensure document_processor and text_extraction use our fake PIL Image module."""
+    _Image = sys.modules.get("PIL.Image")
+    with patch("app.services.document_processor.Image", _Image), \
+         patch("app.services.document_processing.text_extraction.Image", _Image):
         yield
 
 
@@ -1217,6 +1219,7 @@ class TestProcessPdf:
         ):
             ms.MIN_IMAGE_WIDTH = 100
             ms.MIN_IMAGE_HEIGHT = 100
+            ms.MAX_IMAGES_PER_PAGE = 3
             mock_fitz.open.return_value = mock_doc
             mock_doc.__iter__ = Mock(return_value=iter([page]))
 
@@ -2425,6 +2428,7 @@ class TestUncoveredLines:
         ):
             ms.MIN_IMAGE_WIDTH = 100
             ms.MIN_IMAGE_HEIGHT = 100
+            ms.MAX_IMAGES_PER_PAGE = 3
             mock_fitz.open.return_value = mock_doc
 
             r = await proc_vision._process_pdf(b"pdf", "t.pdf", "d")

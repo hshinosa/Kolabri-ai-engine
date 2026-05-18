@@ -79,6 +79,20 @@ async def test_rerank_returns_original_subset_when_disabled():
 
 
 @pytest.mark.asyncio
+async def test_rerank_disabled_respects_explicit_top_k_override():
+    with patch.object(reranker_module.settings, "ENABLE_RERANKING", False), patch.object(
+        reranker_module,
+        "CROSS_ENCODER_AVAILABLE",
+        True,
+    ):
+        instance = CrossEncoderReranker(top_k=3)
+
+    result = await instance.rerank("query", _docs(), top_k=1)
+
+    assert result == _docs()[:1]
+
+
+@pytest.mark.asyncio
 async def test_rerank_returns_empty_list_for_empty_documents():
     with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
         reranker_module,
@@ -113,6 +127,24 @@ async def test_rerank_sorts_by_score_and_adds_metadata():
     assert result[0]["rerank_model"] == "ce-model"
     assert "rerank_score" not in documents[0]
     assert instance.total_reranks == 1
+
+
+@pytest.mark.asyncio
+async def test_rerank_respects_explicit_top_k_override():
+    mock_model = MagicMock()
+    mock_model.predict.return_value = [0.1, 0.9, 0.5]
+
+    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
+        reranker_module,
+        "CROSS_ENCODER_AVAILABLE",
+        True,
+    ):
+        instance = CrossEncoderReranker(model_name="ce-model", top_k=3)
+        instance.model = mock_model
+
+        result = await instance.rerank("search query", _docs(), top_k=1)
+
+    assert [doc["id"] for doc in result] == [2]
 
 
 @pytest.mark.asyncio

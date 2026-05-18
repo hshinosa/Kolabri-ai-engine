@@ -18,6 +18,8 @@ class HealthResponse(BaseModel):
     timestamp: datetime
     services: Dict[str, bool]
     reranker_enabled: bool = False
+    dependencies: Dict[str, str] = {}
+    circuit_breakers: Dict[str, str] = {}
 
 
 # ============== PDF Upload ==============
@@ -348,4 +350,5 @@ class PersonalChatResponse(BaseModel):
 
 class TrackActivityRequest(BaseModel):
     group_id: str
+    user_id: Optional[str] = None
 

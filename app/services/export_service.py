@@ -44,13 +44,9 @@ class ExportService:
         await self.initialize()
         
         try:
-            # Query using XES CaseID prefix
-            # CaseID usually looks like: {group_id}_session_{session_id}
-            cursor = self._db.activity_logs.find({
-                "CaseID": {"$regex": f"^{group_id}"},
-                "Activity": "Student_Message"
-            })
-            logs = await cursor.to_list(length=None)
+            from app.services.repositories import ActivityLogRepository
+            repo = ActivityLogRepository(self._db)
+            logs = await repo.list_student_messages_for_group(group_id)
             
             # Aggregate metrics per user (Resource)
             user_metrics = {}
@@ -108,12 +104,9 @@ class ExportService:
         await self.initialize()
         
         try:
-            # Query all activity logs for this specific session
-            cursor = self._db.activity_logs.find({
-                "CaseID": chat_space_id,
-                "Activity": "Student_Message"
-            })
-            logs = await cursor.to_list(length=None)
+            from app.services.repositories import ActivityLogRepository
+            repo = ActivityLogRepository(self._db)
+            logs = await repo.list_student_messages_for_case(chat_space_id)
             
             user_metrics = {}
             for log in logs:
@@ -288,12 +281,9 @@ class ExportService:
         """
         await self.initialize()
         
-        # 1. Fetch all student messages in this group
-        cursor = self._db.activity_logs.find({
-            "CaseID": {"$regex": f"^{group_id}"},
-            "Activity": "Student_Message"
-        }).sort([("Resource", 1), ("Timestamp", 1)])
-        logs = await cursor.to_list(length=None)
+        from app.services.repositories import ActivityLogRepository
+        repo = ActivityLogRepository(self._db)
+        logs = await repo.list_student_messages_for_group_sorted(group_id)
         
         output = io.StringIO()
         writer = csv.writer(output)

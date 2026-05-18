@@ -15,6 +15,8 @@ from app.core.guardrails import get_guardrails, GuardrailAction
 from app.core.config import settings
 from app.core.prompt_templates import SYSTEM_PERSONAL_CHAT, SYSTEM_RAG_NO_CONTEXT, TEMPERATURE
 from app.services.vector_store import get_vector_store, VectorStoreService
+from app.services.reranker import get_reranker, CrossEncoderReranker
+from app.services.rag_quality import RetrievalQualityControls
 from app.services.llm import get_llm_service, OpenAILLMService, ChatMessage
 from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
 
@@ -35,6 +37,8 @@ class RAGResult:
     srl_sub_phase: Optional[str] = None
     error: Optional[str] = None
     processing_time_ms: float = 0
+    outcome: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class RAGPipeline:
@@ -68,7 +72,9 @@ class RAGPipeline:
         self,
         vector_store: Optional[VectorStoreService] = None,
         llm_service: Optional[OpenAILLMService] = None,
-        efficiency_guard: Optional[EfficiencyGuard] = None
+        efficiency_guard: Optional[EfficiencyGuard] = None,
+        reranker: Optional[CrossEncoderReranker] = None,
+        quality_controls: Optional[RetrievalQualityControls] = None,
     ):
         """
         Initialize RAG pipeline.
@@ -81,6 +87,8 @@ class RAGPipeline:
         self.vector_store = vector_store or get_vector_store()
         self.llm_service = llm_service or get_llm_service()
         self.guardrails = get_guardrails()
+        self.quality_controls = quality_controls or RetrievalQualityControls.from_settings()
+        self.reranker = reranker or get_reranker()
         self.efficiency_guard = efficiency_guard or (
             get_efficiency_guard() if settings.ENABLE_EFFICIENCY_GUARD else None
         )
@@ -88,7 +96,8 @@ class RAGPipeline:
         # [OPTIMIZATION] Sequential semantic caching
         self._last_query: Optional[str] = None
         self._last_contexts: List[Dict[str, Any]] = []
-        self._semantic_threshold = 0.85
+        self._semantic_threshold = self.quality_controls.semantic_cache_threshold
+        self._grounding_threshold = self.quality_controls.grounding_threshold
         
         logger.info("rag_pipeline_initialized", efficiency_enabled=settings.ENABLE_EFFICIENCY_GUARD)
 
@@ -164,7 +173,8 @@ class RAGPipeline:
         n_results: int = 5,
         chat_history: Optional[List[ChatMessage]] = None,
         filter_metadata: Optional[Dict[str, Any]] = None,
-        fading_level: float = 0.0
+        fading_level: float = 0.0,
+        score_threshold: Optional[float] = None,
     ) -> RAGResult:
         """
         Execute a RAG query with Policy-Based optimization, guardrails, and efficiency caching.
@@ -185,17 +195,18 @@ class RAGPipeline:
         cache_context = {
             "collection_name": collection_name,
             "n_results": n_results,
-            "filter_metadata": filter_metadata
+            "filter_metadata": filter_metadata,
+            "score_threshold": score_threshold,
         }
         
         # Define the query execution function
         async def execute_rag_query():
             try:
-                # Step 0: Guardrails check - validate input
                 guardrail_result = self.guardrails.check_input(query)
-                
+                from app.core.guardrail_diagnostics import log_guardrail_decision
+                log_guardrail_decision(guardrail_result, surface="input", route="rag.execute_query")
+
                 if guardrail_result.action == GuardrailAction.BLOCK:
-                    # Query blocked by guardrails
                     processing_time = (datetime.now() - start_time).total_seconds() * 1000
                     
                     logger.warning(
@@ -204,14 +215,18 @@ class RAGPipeline:
                         query=query[:50]
                     )
                     
+                    triggered = guardrail_result.triggered_rules or []
+                    rule_id = triggered[0] if triggered else (guardrail_result.reason or "guarded")
                     return RAGResult(
                         answer=guardrail_result.message or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
                         sources=[],
                         query=query,
                         tokens_used=0,
-                        success=True,  # Blocked but handled successfully
+                        success=True,
                         error=None,
-                        processing_time_ms=processing_time
+                        processing_time_ms=processing_time,
+                        outcome="guarded",
+                        reason=rule_id,
                     )
                 
                 # Use sanitized input if available
@@ -260,11 +275,21 @@ class RAGPipeline:
                     contexts = self._last_contexts
                     search_results = [] # Placeholder since we have contexts
                 else:
+                    from app.services.rag_retrieval_plan import build_retrieval_plan
+                    plan = build_retrieval_plan(
+                        query=query,
+                        query_type=None,
+                        quality_controls=self.quality_controls,
+                        requested_n_results=n_results,
+                        requested_score_threshold=score_threshold,
+                    )
+
                     search_results = await self.vector_store.search(
                         query=query,
                         collection_name=collection_name,
-                        n_results=n_results,
-                        where=filter_metadata
+                        n_results=plan.top_k,
+                        where=filter_metadata,
+                        score_threshold=plan.score_threshold,
                     )
                     
                     if not search_results:
@@ -288,6 +313,20 @@ class RAGPipeline:
                             processing_time_ms=processing_time
                         )
                     
+                    if plan.use_reranker and self.reranker and self.reranker.enabled:
+                        try:
+                            reranked_results = await self.reranker.rerank(
+                                query=query,
+                                documents=search_results,
+                                top_k=plan.rerank_top_n,
+                            )
+                            if reranked_results:
+                                search_results = reranked_results
+                        except Exception as rerank_error:
+                            logger.warning("rag_rerank_fallback", error=str(rerank_error))
+
+                    search_results = search_results[: (n_results or self.quality_controls.top_k_results)]
+
                     # Step 2: Format contexts & Update semantic cache
                     contexts = self._format_search_results(search_results)
                     self._last_query = query
@@ -304,10 +343,10 @@ class RAGPipeline:
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
                 from app.services.grounding_verifier import get_grounding_verifier
                 grounding_verifier = get_grounding_verifier()
-                grounding_result = grounding_verifier.verify_grounding(
+                grounding_result = await grounding_verifier.verify_grounding_async(
                     response=llm_response.content,
                     documents=[{"content": c.get("text", c.get("content", ""))} for c in contexts],
-                    threshold=0.7
+                    threshold=self._grounding_threshold
                 )
 
                 if not grounding_result.is_grounded:
@@ -332,9 +371,12 @@ class RAGPipeline:
                     original_query=query,
                     contexts=contexts
                 )
+                log_guardrail_decision(output_check, surface="output", route="rag.execute_query")
                 
                 scaffolding_triggered = False
                 if output_check.action == GuardrailAction.BLOCK:
+                    triggered = output_check.triggered_rules or []
+                    rule_id = triggered[0] if triggered else (output_check.reason or "guarded")
                     return RAGResult(
                         answer=output_check.message,
                         sources=[],
@@ -342,7 +384,9 @@ class RAGPipeline:
                         tokens_used=llm_response.tokens_used,
                         success=True,
                         scaffolding_triggered=True,
-                        processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000
+                        processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                        outcome="guarded",
+                        reason=rule_id,
                     )
                 elif output_check.action == GuardrailAction.REDIRECT:
                     # Reframe to Socratic
@@ -500,11 +544,18 @@ class RAGPipeline:
             contexts.append({
                 "content": result.get("content", result.get("text", "")),
                 "metadata": result.get("metadata", {}),
-                "score": result.get("score", 0)
+                "score": result.get("score", 0),
+                "rerank_score": result.get("rerank_score"),
             })
         
-        # Sort by score (higher is more relevant)
-        contexts.sort(key=lambda x: x.get("score", 0), reverse=True)
+        # Preserve reranker ordering when available, otherwise sort by retrieval score.
+        contexts.sort(
+            key=lambda x: (
+                x.get("rerank_score") is not None,
+                x.get("rerank_score", x.get("score", 0)),
+            ),
+            reverse=True,
+        )
         
         return contexts
 

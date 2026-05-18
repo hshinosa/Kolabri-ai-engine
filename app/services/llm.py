@@ -12,17 +12,25 @@ from app.core.prompt_templates import (
     COT_INTERVENTION_TEMPLATE, COT_SUMMARY_TEMPLATE,
     COT_GOAL_VALIDATION, COT_GOAL_REFINEMENT, TEMPERATURE,
 )
+from app.services.circuit_breaker import (
+    CircuitBreakerOpenError,
+    get_llm_circuit_breaker,
+)
 import httpx
 
 logger = get_logger(__name__)
 
-MAX_RETRIES = 3
-RETRY_DELAY_BASE = 1.0
-RETRY_DELAY_MULTIPLIER = 2.0
-MAX_CONNECTIONS = 20
-MAX_KEEPALIVE = 10
-TIMEOUT_CONNECT = 5.0
-TIMEOUT_READ = 60.0
+MAX_CONNECTIONS = 50
+MAX_KEEPALIVE = 20
+
+
+class LLMDegradedError(Exception):
+    """Raised when LLM service is degraded: circuit open or retries exhausted."""
+
+    def __init__(self, reason: str, retry_after: int):
+        super().__init__(f"LLM degraded: {reason}")
+        self.reason = reason
+        self.retry_after = retry_after
 
 @dataclass
 class ChatMessage:
@@ -58,8 +66,8 @@ class OpenAILLMService:
                 max_keepalive_connections=MAX_KEEPALIVE,
             ),
             timeout=httpx.Timeout(
-                connect=TIMEOUT_CONNECT,
-                read=TIMEOUT_READ,
+                connect=settings.LLM_TIMEOUT_CONNECT_SECONDS,
+                read=settings.LLM_TIMEOUT_READ_SECONDS,
                 write=10.0,
                 pool=5.0
             ),
@@ -69,7 +77,7 @@ class OpenAILLMService:
             api_key=settings.OPENAI_API_KEY,
             base_url=settings.OPENAI_BASE_URL,
             http_client=self._http_client,
-            max_retries=MAX_RETRIES,
+            max_retries=settings.LLM_MAX_RETRIES,
         )
         self.model = settings.OPENAI_MODEL
         self.temperature = settings.OPENAI_TEMPERATURE
@@ -95,13 +103,39 @@ class OpenAILLMService:
             {"role": "user", "content": prompt},
         ]
 
+        breaker = get_llm_circuit_breaker()
         start = time.time()
         try:
-            result = await self._execute_with_retry(
-                messages, temperature or self.temperature, max_tokens or self.max_tokens
+            result = await breaker.call(
+                self._execute_with_retry,
+                messages,
+                temperature or self.temperature,
+                max_tokens or self.max_tokens,
             )
             result.response_time_ms = (time.time() - start) * 1000
             return result
+        except CircuitBreakerOpenError:
+            elapsed = (time.time() - start) * 1000
+            retry_after = max(1, int(breaker.recovery_timeout))
+            logger.warning(
+                "llm_degraded_breaker_open",
+                retry_after=retry_after,
+                response_time_ms=round(elapsed, 2),
+            )
+            raise LLMDegradedError(
+                reason="llm_circuit_open", retry_after=retry_after
+            )
+        except (RateLimitError, APIConnectionError, APIError) as exc:
+            elapsed = (time.time() - start) * 1000
+            logger.warning(
+                "llm_degraded_retry_exhausted",
+                error=str(exc),
+                response_time_ms=round(elapsed, 2),
+            )
+            raise LLMDegradedError(
+                reason="llm_retry_exhausted",
+                retry_after=settings.LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS,
+            )
         except Exception as e:
             elapsed = (time.time() - start) * 1000
             logger.error("llm_generation_failed", error=str(e), response_time_ms=round(elapsed, 2))
@@ -111,10 +145,10 @@ class OpenAILLMService:
             )
 
     @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
+        stop=stop_after_attempt(settings.LLM_MAX_RETRIES),
         wait=wait_exponential(
-            multiplier=0.01 if settings.ENV == "testing" else RETRY_DELAY_MULTIPLIER,
-            min=0.01 if settings.ENV == "testing" else RETRY_DELAY_BASE,
+            multiplier=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_MULTIPLIER,
+            min=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_BASE,
         ),
         retry=retry_if_exception_type((RateLimitError, APIConnectionError))
         | retry_if_exception_type(APIError),

@@ -100,6 +100,52 @@ class TestVectorStoreService:
         ]
 
     @pytest.mark.asyncio
+    async def test_search_filters_results_using_default_similarity_threshold(self, vector_store_service):
+        vector_store_service._client.query_points.return_value = SimpleNamespace(
+            points=[
+                _point("First", {"page": 1, "source": "a.pdf"}, 0.91),
+                _point("Second", {"page": 2, "source": "b.pdf"}, 0.77),
+            ]
+        )
+
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
+            "app.services.vector_store.settings.SIMILARITY_THRESHOLD", 0.8
+        ):
+            results = await vector_store_service.search(
+                query="hello",
+                collection_name="docs",
+                n_results=2,
+            )
+
+        assert results == [
+            {"content": "First", "metadata": {"page": 1, "source": "a.pdf"}, "score": 0.91},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_search_allows_explicit_score_threshold_override(self, vector_store_service):
+        vector_store_service._client.query_points.return_value = SimpleNamespace(
+            points=[
+                _point("First", {"page": 1, "source": "a.pdf"}, 0.91),
+                _point("Second", {"page": 2, "source": "b.pdf"}, 0.77),
+            ]
+        )
+
+        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
+            "app.services.vector_store.settings.SIMILARITY_THRESHOLD", 0.95
+        ):
+            results = await vector_store_service.search(
+                query="hello",
+                collection_name="docs",
+                n_results=2,
+                score_threshold=0.7,
+            )
+
+        assert results == [
+            {"content": "First", "metadata": {"page": 1, "source": "a.pdf"}, "score": 0.91},
+            {"content": "Second", "metadata": {"page": 2, "source": "b.pdf"}, "score": 0.77},
+        ]
+
+    @pytest.mark.asyncio
     async def test_search_builds_filter_from_where(self, vector_store_service):
         vector_store_service._client.query_points.return_value = SimpleNamespace(points=[])
 
@@ -150,6 +196,7 @@ class TestVectorStoreService:
             query="what?",
             collection_name="kolabri_course1",
             n_results=7,
+            score_threshold=None,
         )
         assert result == {
             "documents": [["Doc A", "Doc B"]],
@@ -166,6 +213,7 @@ class TestVectorStoreService:
             query="what?",
             collection_name="kolabri_course1",
             n_results=2,
+            score_threshold=None,
         )
 
     @pytest.mark.asyncio

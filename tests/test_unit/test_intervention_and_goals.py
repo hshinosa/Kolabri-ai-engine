@@ -679,9 +679,9 @@ class TestSMARTCriterion:
 
 class TestInterventionInit:
     def test_constants(self, intervention_svc):
-        assert intervention_svc.OFF_TOPIC_THRESHOLD == 0.6
-        assert intervention_svc.INACTIVITY_THRESHOLD_MINUTES == 30
-        assert intervention_svc.MINIMUM_MESSAGES_FOR_SUMMARY == 10
+        assert intervention_svc.off_topic_threshold == 0.6
+        assert intervention_svc.inactivity_threshold_minutes == 30
+        assert intervention_svc.minimum_messages_for_summary == 10
 
     def test_injected_llm(self, mock_llm, intervention_svc):
         assert intervention_svc.llm_service is mock_llm

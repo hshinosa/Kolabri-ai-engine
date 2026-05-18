@@ -93,6 +93,17 @@ class RedisCache:
             await self._redis.close()
             self._redis = None
             logger.info("redis_cache_closed")
+
+    async def ping(self) -> bool:
+        """Lightweight liveness probe used by /api/health."""
+        try:
+            if not self._redis:
+                await self.initialize()
+            await self._redis.ping()
+            return True
+        except Exception as e:
+            logger.warning("redis_ping_failed", error=str(e))
+            return False
     
     async def get(self, key: str) -> Optional[Any]:
         """Get value dari cache."""

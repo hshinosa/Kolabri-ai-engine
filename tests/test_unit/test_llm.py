@@ -12,13 +12,11 @@ Tests for LLM service including:
 import pytest
 from unittest.mock import AsyncMock, Mock, patch, MagicMock, call
 
+from app.core.config import settings
 from app.services.llm import (
     OpenAILLMService,
     LLMResponse,
     ChatMessage,
-    MAX_RETRIES,
-    RETRY_DELAY_BASE,
-    RETRY_DELAY_MULTIPLIER,
 )
 
 
@@ -69,7 +67,7 @@ def test_llm_initialization(llm_service):
     """Test LLM service initializes correctly."""
     service, _ = llm_service
     assert service.model == "test-model"
-    assert MAX_RETRIES == 3
+    assert settings.LLM_MAX_RETRIES == 3
 
 
 # ==============================================================================
@@ -253,21 +251,21 @@ async def test_no_retry_on_client_error_4xx(llm_service):
 
 @pytest.mark.asyncio
 async def test_max_retries_exceeded(llm_service):
-    """Test that request fails after max retries."""
     from openai import RateLimitError
+    from app.services.llm import LLMDegradedError
+    from app.services.circuit_breaker import get_llm_circuit_breaker
 
     service, mock_client = llm_service
+    get_llm_circuit_breaker().reset()
 
-    # Always fail
     rate_limit_error = RateLimitError(
         message="Always rate limited", response=MagicMock(), body=MagicMock()
     )
     mock_client.chat.completions.create = AsyncMock(side_effect=rate_limit_error)
 
-    result = await service.generate("Test")
-
-    assert result.success is False
-    assert "Always rate limited" in result.error
+    with pytest.raises(LLMDegradedError) as exc_info:
+        await service.generate("Test")
+    assert exc_info.value.reason == "llm_retry_exhausted"
     assert mock_client.chat.completions.create.call_count == 3
 
 

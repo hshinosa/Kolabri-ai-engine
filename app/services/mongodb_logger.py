@@ -10,6 +10,7 @@ import io
 from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
+import structlog
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.pii_detector import PIIDetector
@@ -75,7 +76,12 @@ class MongoDBLogger:
 
             if "Timestamp" not in entry:
                 entry["Timestamp"] = datetime.now()
-            
+
+            if "request_id" not in entry:
+                bound = structlog.contextvars.get_contextvars().get("request_id")
+                if bound:
+                    entry["request_id"] = bound
+
             await self.db.activity_logs.insert_one(entry)
             logger.debug("activity_logged", case_id=entry.get("CaseID"), activity=entry.get("Activity"))
         except Exception as e:
@@ -146,6 +152,17 @@ class MongoDBLogger:
     async def close(self):
         if self.client:
             self.client.close()
+
+    async def ping(self) -> bool:
+        """Lightweight liveness probe used by /api/health."""
+        if not self.enabled or self.client is None:
+            return False
+        try:
+            await self.client.admin.command("ping")
+            return True
+        except Exception as e:
+            logger.warning("mongo_ping_failed", error=str(e))
+            return False
 
 _mongo_logger: Optional[MongoDBLogger] = None
 

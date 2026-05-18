@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.guardrails import GuardrailAction
+from app.services.rag_quality import RetrievalQualityControls
 from app.services import rag as rag_module
 from app.services.rag import RAGPipeline, RAGResult, get_rag_pipeline
 
@@ -71,6 +72,37 @@ class TestRAGPipeline:
         assert pipeline.vector_store is mock_vector_store
         assert pipeline.llm_service is mock_llm
 
+    def test_init_uses_configurable_semantic_threshold(self, mock_vector_store, mock_llm, mock_guardrails):
+        with patch("app.services.rag.get_guardrails", return_value=mock_guardrails), patch.object(
+            rag_module.settings, "RAG_SEMANTIC_CACHE_THRESHOLD", 0.93
+        ):
+            pipeline = RAGPipeline(vector_store=mock_vector_store, llm_service=mock_llm, efficiency_guard=None)
+
+        assert pipeline._semantic_threshold == 0.93
+
+    def test_init_accepts_internal_quality_controls(self, mock_vector_store, mock_llm, mock_guardrails):
+        controls = RetrievalQualityControls(
+            top_k_results=4,
+            similarity_threshold=0.81,
+            semantic_cache_threshold=0.91,
+            reranking_enabled=True,
+            rerank_top_k=2,
+            rerank_retrieve_k=9,
+            grounding_threshold=0.55,
+        )
+
+        with patch("app.services.rag.get_guardrails", return_value=mock_guardrails):
+            pipeline = RAGPipeline(
+                vector_store=mock_vector_store,
+                llm_service=mock_llm,
+                efficiency_guard=None,
+                quality_controls=controls,
+            )
+
+        assert pipeline.quality_controls is controls
+        assert pipeline._semantic_threshold == 0.91
+        assert pipeline._grounding_threshold == 0.55
+
     def test_should_retrieve(self, rag_pipeline):
         assert rag_pipeline._should_retrieve("halo") is False
         assert rag_pipeline._should_retrieve("test") is False
@@ -106,10 +138,131 @@ class TestRAGPipeline:
     async def test_query_fetch(self, rag_pipeline, mock_guardrails):
         mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="Jelaskan machine learning", reason=None, message=None)
         with patch("app.services.grounding_verifier.get_grounding_verifier") as mock_grounding:
-            mock_grounding.return_value.verify_grounding.return_value = MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
             result = await rag_pipeline.query("Jelaskan machine learning dan deep learning")
         assert result.success is True
         assert len(result.sources) > 0
+
+    @pytest.mark.asyncio
+    async def test_query_uses_reranker_controls_when_enabled(self, mock_vector_store, mock_llm, mock_guardrails):
+        controls = RetrievalQualityControls(
+            top_k_results=5,
+            similarity_threshold=0.6,
+            semantic_cache_threshold=0.85,
+            reranking_enabled=True,
+            rerank_top_k=2,
+            rerank_retrieve_k=4,
+            grounding_threshold=0.4,
+        )
+        mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="Jelaskan machine learning", reason=None, message=None)
+        mock_vector_store.search = AsyncMock(
+            return_value=[
+                {"content": "Doc 1", "metadata": {"source": "a.pdf", "page": 1}, "score": 0.60},
+                {"content": "Doc 2", "metadata": {"source": "b.pdf", "page": 2}, "score": 0.50},
+                {"content": "Doc 3", "metadata": {"source": "c.pdf", "page": 3}, "score": 0.40},
+            ]
+        )
+        mock_reranker = MagicMock(enabled=True, retrieve_k=4, top_k=2)
+        mock_reranker.rerank = AsyncMock(
+            return_value=[
+                {"content": "Doc 2", "metadata": {"source": "b.pdf", "page": 2}, "score": 0.50, "rerank_score": 0.95},
+                {"content": "Doc 1", "metadata": {"source": "a.pdf", "page": 1}, "score": 0.60, "rerank_score": 0.90},
+            ]
+        )
+
+        with patch("app.services.rag.get_guardrails", return_value=mock_guardrails), patch.object(
+            rag_module.settings, "ENABLE_EFFICIENCY_GUARD", False
+        ), patch("app.services.grounding_verifier.get_grounding_verifier") as mock_grounding:
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
+            pipeline = RAGPipeline(
+                vector_store=mock_vector_store,
+                llm_service=mock_llm,
+                efficiency_guard=None,
+                reranker=mock_reranker,
+                quality_controls=controls,
+            )
+
+            result = await pipeline.query("Jelaskan machine learning dan deep learning", n_results=2)
+
+        assert result.success is True
+        mock_vector_store.search.assert_awaited_once()
+        assert mock_vector_store.search.await_args.kwargs["n_results"] == 4
+        mock_reranker.rerank.assert_awaited_once()
+        generate_kwargs = mock_llm.generate_rag_response.await_args.kwargs
+        assert [ctx["metadata"]["source"] for ctx in generate_kwargs["contexts"]] == ["b.pdf", "a.pdf"]
+
+    @pytest.mark.asyncio
+    async def test_query_uses_internal_runtime_plan_resolution(self, mock_vector_store, mock_llm, mock_guardrails):
+        controls = RetrievalQualityControls(
+            top_k_results=5,
+            similarity_threshold=0.81,
+            semantic_cache_threshold=0.85,
+            reranking_enabled=True,
+            rerank_top_k=2,
+            rerank_retrieve_k=9,
+            grounding_threshold=0.4,
+        )
+        mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="Jelaskan machine learning", reason=None, message=None)
+        mock_vector_store.search = AsyncMock(
+            return_value=[
+                {"content": "Doc 1", "metadata": {"source": "a.pdf", "page": 1}, "score": 0.9},
+                {"content": "Doc 2", "metadata": {"source": "b.pdf", "page": 2}, "score": 0.8},
+            ]
+        )
+
+        with patch("app.services.rag.get_guardrails", return_value=mock_guardrails), patch.object(
+            rag_module.settings, "ENABLE_EFFICIENCY_GUARD", False
+        ), patch("app.services.grounding_verifier.get_grounding_verifier") as mock_grounding:
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
+            pipeline = RAGPipeline(
+                vector_store=mock_vector_store,
+                llm_service=mock_llm,
+                efficiency_guard=None,
+                quality_controls=controls,
+            )
+
+            await pipeline.query("Jelaskan machine learning dan deep learning", n_results=2)
+
+        search_kwargs = mock_vector_store.search.await_args.kwargs
+        assert search_kwargs["n_results"] == 9
+        assert search_kwargs["score_threshold"] == 0.81
+
+    @pytest.mark.asyncio
+    async def test_query_falls_back_to_vector_results_when_reranker_fails(self, mock_vector_store, mock_llm, mock_guardrails):
+        mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="Jelaskan machine learning", reason=None, message=None)
+        mock_vector_store.search = AsyncMock(
+            return_value=[
+                {"content": "Doc 1", "metadata": {"source": "a.pdf", "page": 1}, "score": 0.90},
+                {"content": "Doc 2", "metadata": {"source": "b.pdf", "page": 2}, "score": 0.80},
+            ]
+        )
+        mock_reranker = MagicMock(enabled=True, retrieve_k=4, top_k=2)
+        mock_reranker.rerank = AsyncMock(side_effect=RuntimeError("reranker boom"))
+
+        with patch("app.services.rag.get_guardrails", return_value=mock_guardrails), patch(
+            "app.services.grounding_verifier.get_grounding_verifier"
+        ) as mock_grounding:
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
+            pipeline = RAGPipeline(
+                vector_store=mock_vector_store,
+                llm_service=mock_llm,
+                efficiency_guard=None,
+                reranker=mock_reranker,
+            )
+
+            result = await pipeline.query("Jelaskan machine learning dan deep learning")
+
+        assert result.success is True
+        generate_kwargs = mock_llm.generate_rag_response.await_args.kwargs
+        assert [ctx["metadata"]["source"] for ctx in generate_kwargs["contexts"]] == ["a.pdf", "b.pdf"]
 
     @pytest.mark.asyncio
     async def test_query_no_results(self, rag_pipeline, mock_guardrails, mock_vector_store):
@@ -123,7 +276,9 @@ class TestRAGPipeline:
     async def test_query_output_guardrails(self, rag_pipeline, mock_guardrails):
         mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="test query panjang", reason=None, message=None)
         with patch("app.services.grounding_verifier.get_grounding_verifier") as mock_grounding:
-            mock_grounding.return_value.verify_grounding.return_value = MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
 
             mock_guardrails.check_output.return_value = MagicMock(action=GuardrailAction.BLOCK, message="Output blocked", sanitized_input=None)
             blocked = await rag_pipeline.query("test query yang panjang ini")
@@ -190,7 +345,9 @@ class TestRAGPipeline:
     async def test_query_with_course_context_and_similar_questions(self, rag_pipeline, mock_guardrails, mock_vector_store):
         mock_guardrails.check_input.return_value = MagicMock(action=GuardrailAction.ALLOW, sanitized_input="test query panjang", reason=None, message=None)
         with patch("app.services.grounding_verifier.get_grounding_verifier") as mock_grounding:
-            mock_grounding.return_value.verify_grounding.return_value = MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            mock_grounding.return_value.verify_grounding_async = AsyncMock(
+                return_value=MagicMock(is_grounded=True, grounding_ratio=1.0, ungrounded_claims=[])
+            )
             result = await rag_pipeline.query_with_course_context("Test question", course_id="course123")
         assert result.success is True
 

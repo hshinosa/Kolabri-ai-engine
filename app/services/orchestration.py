@@ -363,15 +363,19 @@ class Orchestrator:
 
     async def _get_latest_session_id(self, group_id: str) -> str:
         try:
-            latest = await self.mongo_logger.db.activity_logs.find_one({"CaseID": {"$regex": f"^{group_id}_session_"}}, sort=[("Timestamp", -1)])
-            return latest["CaseID"].split("_session_")[-1] if latest else "1"
+            from app.services.repositories import ActivityLogRepository
+            repo = ActivityLogRepository(self.mongo_logger.db)
+            session_id = await repo.get_latest_session_for_group(group_id)
+            return session_id or "1"
         except: return "1"
 
     async def _calculate_intervention_impact(self, group_id: str) -> Dict[str, Any]:
         try:
-            last = await self.mongo_logger.db.activity_logs.find_one({"CaseID": {"$regex": f"^{group_id}"}, "Activity": {"$regex": "^System_Intervention"}}, sort=[("Timestamp", -1)])
+            from app.services.repositories import ActivityLogRepository
+            repo = ActivityLogRepository(self.mongo_logger.db)
+            last = await repo.get_last_intervention_for_group(group_id)
             if not last: return {"status": "none"}
-            resp = await self.mongo_logger.db.activity_logs.find_one({"CaseID": {"$regex": f"^{group_id}"}, "Activity": "Student_Message", "Timestamp": {"$gt": last["Timestamp"]}}, sort=[("Timestamp", 1)])
+            resp = await repo.get_first_student_message_after(group_id, last["Timestamp"])
             return {"status": "positive" if resp else "no_response"}
         except: return {"status": "unknown"}
 

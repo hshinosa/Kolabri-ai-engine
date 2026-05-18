@@ -92,7 +92,7 @@ class TestAskEndpoint:
 
     def test_success_no_sources(self, client):
         """RAG returns answer without sources."""
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("Hello world"))
             m.return_value = rag
@@ -111,7 +111,7 @@ class TestAskEndpoint:
     def test_success_with_sources_with_page(self, client):
         """Sources containing 'page' key produce '(hal. N)' citation."""
         sources = [{"source": "slides.pdf", "page": 5}]
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("Answer", sources))
             m.return_value = rag
@@ -129,7 +129,7 @@ class TestAskEndpoint:
     def test_success_with_sources_without_page(self, client):
         """Sources without 'page' key still list the document name."""
         sources = [{"source": "notes.txt"}]
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("Answer", sources))
             m.return_value = rag
@@ -146,7 +146,7 @@ class TestAskEndpoint:
     def test_sources_default_name_when_missing(self, client):
         """Source dict missing 'source' key falls back to 'Dokumen'."""
         sources = [{"relevance": 0.9}]
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("Answer", sources))
             m.return_value = rag
@@ -161,7 +161,7 @@ class TestAskEndpoint:
     def test_sources_capped_at_three(self, client):
         """Only the first 3 sources are listed regardless of how many exist."""
         sources = [{"source": f"doc{i}.pdf", "page": i} for i in range(6)]
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("Answer", sources))
             m.return_value = rag
@@ -179,7 +179,7 @@ class TestAskEndpoint:
 
     def test_rag_failure_returns_fallback(self, client):
         """RAG result with success=False returns Indonesian fallback."""
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(
                 return_value=_rag_result("", success=False, error="no match")
@@ -198,7 +198,7 @@ class TestAskEndpoint:
 
     def test_exception_returns_error_response(self, client):
         """Unhandled exception in RAG pipeline returns error answer."""
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(side_effect=RuntimeError("LLM timeout"))
             m.return_value = rag
@@ -225,7 +225,7 @@ class TestAskEndpoint:
 
     def test_collection_name_uses_course_id(self, client):
         """Verify the collection name is built as 'course_{course_id}'."""
-        with patch("app.api.routes.get_rag_pipeline") as m:
+        with patch("app.api.routes.chat.get_rag_pipeline") as m:
             rag = MagicMock()
             rag.query = AsyncMock(return_value=_rag_result("OK"))
             m.return_value = rag
@@ -317,7 +317,7 @@ class TestIngestEndpoint:
 
     def test_background_task_is_scheduled(self, client):
         """Verify that background_tasks.add_task is called for processing."""
-        with patch("app.api.routes.BackgroundTasks.add_task") as mock_add:
+        with patch("app.api.routes.documents.BackgroundTasks.add_task") as mock_add:
             resp = client.post(
                 "/api/ingest",
                 data={"course_id": "c1", "file_id": "f1"},
@@ -354,11 +354,11 @@ class TestIngestEndpoint:
 
     def test_temp_file_write_error_returns_500(self, client):
         """OS error during temp file write returns 500."""
-        with patch("app.api.routes.tempfile.mkstemp") as mock_mkstemp:
+        with patch("app.api.routes.documents.tempfile.mkstemp") as mock_mkstemp:
             # Return a fake fd and path, then make os.fdopen raise
             mock_mkstemp.return_value = (999, "/tmp/fake_path")
-            with patch("app.api.routes.os.fdopen", side_effect=OSError("disk full")):
-                with patch("app.api.routes.os.unlink"):
+            with patch("app.api.routes.documents.os.fdopen", side_effect=OSError("disk full")):
+                with patch("app.api.routes.documents.os.unlink"):
                     resp = client.post(
                         "/api/ingest",
                         data={"course_id": "c1", "file_id": "f1"},
@@ -414,9 +414,16 @@ class TestHealthEndpoint:
 
     def test_all_services_healthy(self, client):
         """Both vector_store and LLM healthy → 'healthy'."""
+        mongo = MagicMock()
+        mongo.enabled = True
+        mongo.ping = AsyncMock(return_value=True)
+        redis_cache = MagicMock()
+        redis_cache.ping = AsyncMock(return_value=True)
         with (
-            patch("app.api.routes.get_vector_store") as mock_vs,
+            patch("app.api.routes.health.get_vector_store") as mock_vs,
             patch("app.services.llm.get_llm_service") as mock_llm_fn,
+            patch("app.services.mongodb_logger.get_mongo_logger", return_value=mongo),
+            patch("app.core.redis_cache.get_redis_cache", AsyncMock(return_value=redis_cache)),
         ):
             vs = MagicMock()
             vs._ensure_collection = AsyncMock()
@@ -438,7 +445,7 @@ class TestHealthEndpoint:
 
     def test_vector_store_down_is_degraded(self, client):
         """Vector store failure → 'degraded'."""
-        with patch("app.api.routes.get_vector_store") as mock_vs:
+        with patch("app.api.routes.health.get_vector_store") as mock_vs:
             vs = MagicMock()
             vs._ensure_collection = AsyncMock(side_effect=Exception("DB down"))
             mock_vs.return_value = vs
@@ -452,7 +459,7 @@ class TestHealthEndpoint:
     def test_llm_down_is_degraded(self, client):
         """LLM failure → 'degraded'."""
         with (
-            patch("app.api.routes.get_vector_store") as mock_vs,
+            patch("app.api.routes.health.get_vector_store") as mock_vs,
             patch("app.services.llm.get_llm_service", side_effect=Exception("no key")),
         ):
             vs = MagicMock()
@@ -468,7 +475,7 @@ class TestHealthEndpoint:
     def test_llm_model_none_is_degraded(self, client):
         """LLM model attribute is None → service marked False."""
         with (
-            patch("app.api.routes.get_vector_store") as mock_vs,
+            patch("app.api.routes.health.get_vector_store") as mock_vs,
             patch("app.services.llm.get_llm_service") as mock_llm_fn,
         ):
             vs = MagicMock()
@@ -508,7 +515,7 @@ class TestEngagementEndpoint:
             confidence=0.9,
         )
 
-        with patch("app.api.routes.get_engagement_analyzer") as m:
+        with patch("app.api.routes.analytics.get_engagement_analyzer") as m:
             analyzer = MagicMock()
             analyzer.analyze_interaction.return_value = analysis
             m.return_value = analyzer
@@ -531,7 +538,7 @@ class TestEngagementEndpoint:
 
     def test_analyzer_exception_returns_error(self, client):
         """If analyzer raises, endpoint returns success=False with zeroed metrics."""
-        with patch("app.api.routes.get_engagement_analyzer") as m:
+        with patch("app.api.routes.analytics.get_engagement_analyzer") as m:
             analyzer = MagicMock()
             analyzer.analyze_interaction.side_effect = ValueError("tokenizer error")
             m.return_value = analyzer
@@ -568,7 +575,7 @@ class TestEngagementEndpoint:
             confidence=0.5,
         )
 
-        with patch("app.api.routes.get_engagement_analyzer") as m:
+        with patch("app.api.routes.analytics.get_engagement_analyzer") as m:
             analyzer = MagicMock()
             analyzer.analyze_interaction.return_value = analysis
             m.return_value = analyzer
@@ -596,7 +603,7 @@ class TestGroupDashboardEndpoint:
 
     def test_success(self, client):
         payload = {"context": "group", "group_id": "g1", "status_color": "green"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.analytics.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_group_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -607,7 +614,7 @@ class TestGroupDashboardEndpoint:
         assert resp.json() == payload
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.analytics.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_group_dashboard_data = AsyncMock(
                 side_effect=Exception("DB timeout")
@@ -631,7 +638,7 @@ class TestIndividualDashboardEndpoint:
 
     def test_success(self, client):
         payload = {"context": "individual", "user_id": "u1", "total_messages": 42}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.analytics.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_individual_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -642,7 +649,7 @@ class TestIndividualDashboardEndpoint:
         assert resp.json()["total_messages"] == 42
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.analytics.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_individual_dashboard_data = AsyncMock(
                 side_effect=RuntimeError("fail")
@@ -665,7 +672,7 @@ class TestLegacyDashboardEndpoint:
 
     def test_legacy_delegates(self, client):
         payload = {"context": "group", "group_id": "g1"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.analytics.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_group_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -687,7 +694,7 @@ class TestExportGroupActivityEndpoint:
 
     def test_success_csv(self, client):
         csv = "Name,Score\nAlice,90\nBob,85\n"
-        with patch("app.api.routes.get_export_service") as m:
+        with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
             svc.export_group_activity_detailed = AsyncMock(return_value=csv)
             m.return_value = svc
@@ -701,7 +708,7 @@ class TestExportGroupActivityEndpoint:
         assert "Name,Score" in resp.content.decode()
 
     def test_export_error_returns_500(self, client):
-        with patch("app.api.routes.get_export_service") as m:
+        with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
             svc.export_group_activity_detailed = AsyncMock(
                 side_effect=Exception("MongoDB unreachable")
@@ -725,7 +732,7 @@ class TestExportChatSpaceActivityEndpoint:
 
     def test_success_csv(self, client):
         csv = "Student,Messages\nAlice,10\n"
-        with patch("app.api.routes.get_export_service") as m:
+        with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
             svc.export_chat_space_activity = AsyncMock(return_value=csv)
             m.return_value = svc
@@ -739,7 +746,7 @@ class TestExportChatSpaceActivityEndpoint:
     def test_include_detailed_query_param(self, client):
         """Verify include_detailed param is forwarded to service."""
         csv = "col\nval\n"
-        with patch("app.api.routes.get_export_service") as m:
+        with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
             svc.export_chat_space_activity = AsyncMock(return_value=csv)
             m.return_value = svc
@@ -751,7 +758,7 @@ class TestExportChatSpaceActivityEndpoint:
         )
 
     def test_export_error_returns_500(self, client):
-        with patch("app.api.routes.get_export_service") as m:
+        with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
             svc.export_chat_space_activity = AsyncMock(side_effect=Exception("oops"))
             m.return_value = svc
@@ -813,7 +820,7 @@ class TestGoalValidateEndpoint:
             "suggestions": [],
             "success": True,
         }
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.goals.get_orchestrator") as m:
             orch = MagicMock()
             orch.validate_goal = AsyncMock(return_value=result)
             m.return_value = orch
@@ -841,7 +848,7 @@ class TestGoalValidateEndpoint:
             "suggestions": ["Add metrics"],
             "success": True,
         }
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.goals.get_orchestrator") as m:
             orch = MagicMock()
             orch.validate_goal = AsyncMock(return_value=result)
             m.return_value = orch
@@ -860,7 +867,7 @@ class TestGoalValidateEndpoint:
         assert len(data["missing_criteria"]) == 2
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.goals.get_orchestrator") as m:
             orch = MagicMock()
             orch.validate_goal = AsyncMock(side_effect=Exception("service down"))
             m.return_value = orch
@@ -897,7 +904,7 @@ class TestGoalRefineEndpoint:
 
     def test_success(self, client):
         result = {"success": True, "hint": "What metrics will you track?"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.goals.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_goal_refinement = AsyncMock(return_value=result)
             m.return_value = orch
@@ -926,7 +933,7 @@ class TestGoalRefineEndpoint:
         assert "Invalid JSON" in resp.json()["detail"]
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.goals.get_orchestrator") as m:
             orch = MagicMock()
             orch.get_goal_refinement = AsyncMock(
                 side_effect=RuntimeError("LLM overload")
@@ -964,7 +971,7 @@ class TestGroupStatusEndpoint:
             "should_intervene": False,
             "interventions": [],
         }
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.check_group_status = AsyncMock(return_value=result)
             m.return_value = orch
@@ -977,7 +984,7 @@ class TestGroupStatusEndpoint:
     def test_with_topic_query_param(self, client):
         """Topic query param is forwarded to orchestrator."""
         result = {"group_id": "g1", "should_intervene": False, "interventions": []}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.check_group_status = AsyncMock(return_value=result)
             m.return_value = orch
@@ -994,7 +1001,7 @@ class TestGroupStatusEndpoint:
             "should_intervene": True,
             "interventions": [{"type": "silence", "message": "Wake up!"}],
         }
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.check_group_status = AsyncMock(return_value=result)
             m.return_value = orch
@@ -1006,7 +1013,7 @@ class TestGroupStatusEndpoint:
         assert len(data["interventions"]) == 1
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.check_group_status = AsyncMock(side_effect=Exception("fail"))
             m.return_value = orch
@@ -1027,7 +1034,7 @@ class TestTrackParticipationEndpoint:
 
     def test_success(self, client):
         result = {"success": True, "group_id": "g1", "user_id": "u1"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.track_participation = AsyncMock(return_value=result)
             m.return_value = orch
@@ -1041,7 +1048,7 @@ class TestTrackParticipationEndpoint:
         assert resp.json()["success"] is True
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.track_participation = AsyncMock(side_effect=Exception("err"))
             m.return_value = orch
@@ -1069,7 +1076,7 @@ class TestUpdateLastMessageEndpoint:
 
     def test_success(self, client):
         result = {"success": True, "group_id": "g1", "timestamp": "2024-01-01T12:00:00"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.update_last_message_time = AsyncMock(return_value=result)
             m.return_value = orch
@@ -1080,7 +1087,7 @@ class TestUpdateLastMessageEndpoint:
         assert resp.json()["success"] is True
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.update_last_message_time = AsyncMock(side_effect=Exception("err"))
             m.return_value = orch
@@ -1101,7 +1108,7 @@ class TestSetGroupTopicEndpoint:
 
     def test_success(self, client):
         result = {"success": True, "group_id": "g1", "topic": "Normalization"}
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.set_group_topic = AsyncMock(return_value=result)
             m.return_value = orch
@@ -1117,7 +1124,7 @@ class TestSetGroupTopicEndpoint:
         assert data["topic"] == "Normalization"
 
     def test_orchestrator_error_returns_500(self, client):
-        with patch("app.api.routes.get_orchestrator") as m:
+        with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
             orch.set_group_topic = AsyncMock(side_effect=Exception("err"))
             m.return_value = orch
@@ -1146,8 +1153,8 @@ class TestCacheStatisticsEndpoint:
     def test_enabled(self, client):
         stats = {"cache_hits": 50, "cache_misses": 10, "hit_rate_percent": 83.3}
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             mock_s.VERSION = "1.0.0"
@@ -1163,7 +1170,7 @@ class TestCacheStatisticsEndpoint:
         assert data["cache_hits"] == 50
 
     def test_disabled(self, client):
-        with patch("app.api.routes.settings") as mock_s:
+        with patch("app.api.routes.efficiency.settings") as mock_s:
             mock_s.ENABLE_EFFICIENCY_GUARD = False
 
             resp = client.get("/api/efficiency/cache/statistics")
@@ -1177,8 +1184,8 @@ class TestCacheStatisticsEndpoint:
 
     def test_guard_error_returns_500(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1201,8 +1208,8 @@ class TestCacheClearEndpoint:
 
     def test_enabled(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1215,7 +1222,7 @@ class TestCacheClearEndpoint:
         guard.clear_cache.assert_called_once()
 
     def test_disabled(self, client):
-        with patch("app.api.routes.settings") as mock_s:
+        with patch("app.api.routes.efficiency.settings") as mock_s:
             mock_s.ENABLE_EFFICIENCY_GUARD = False
 
             resp = client.get("/api/efficiency/cache/clear")
@@ -1224,8 +1231,8 @@ class TestCacheClearEndpoint:
 
     def test_guard_error_returns_500(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1253,8 +1260,8 @@ class TestEfficiencyStatisticsEndpoint:
             "performance": {"cache_hit_rate_percent": 66.0},
         }
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1269,7 +1276,7 @@ class TestEfficiencyStatisticsEndpoint:
         assert data["rate_limit"]["total_requests"] == 50
 
     def test_disabled(self, client):
-        with patch("app.api.routes.settings") as mock_s:
+        with patch("app.api.routes.efficiency.settings") as mock_s:
             mock_s.ENABLE_EFFICIENCY_GUARD = False
 
             resp = client.get("/api/efficiency/statistics")
@@ -1278,8 +1285,8 @@ class TestEfficiencyStatisticsEndpoint:
 
     def test_guard_error_returns_500(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1307,8 +1314,8 @@ class TestRateLimitInfoEndpoint:
             "is_allowed": True,
         }
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1323,7 +1330,7 @@ class TestRateLimitInfoEndpoint:
         assert data["is_allowed"] is True
 
     def test_disabled(self, client):
-        with patch("app.api.routes.settings") as mock_s:
+        with patch("app.api.routes.efficiency.settings") as mock_s:
             mock_s.ENABLE_EFFICIENCY_GUARD = False
 
             resp = client.get("/api/efficiency/rate-limit/user_42")
@@ -1332,8 +1339,8 @@ class TestRateLimitInfoEndpoint:
 
     def test_guard_error_returns_500(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1357,8 +1364,8 @@ class TestHighFrequencyQueriesEndpoint:
     def test_enabled_default_limit(self, client):
         queries = [{"query": "React?", "frequency": 50}]
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1375,8 +1382,8 @@ class TestHighFrequencyQueriesEndpoint:
 
     def test_custom_limit(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1388,7 +1395,7 @@ class TestHighFrequencyQueriesEndpoint:
         guard.get_high_frequency_queries.assert_called_once_with(limit=5)
 
     def test_disabled(self, client):
-        with patch("app.api.routes.settings") as mock_s:
+        with patch("app.api.routes.efficiency.settings") as mock_s:
             mock_s.ENABLE_EFFICIENCY_GUARD = False
 
             resp = client.get("/api/efficiency/high-frequency-queries")
@@ -1397,8 +1404,8 @@ class TestHighFrequencyQueriesEndpoint:
 
     def test_guard_error_returns_500(self, client):
         with (
-            patch("app.api.routes.settings") as mock_s,
-            patch("app.api.routes.get_efficiency_guard") as mock_g,
+            patch("app.api.routes.efficiency.settings") as mock_s,
+            patch("app.api.routes.efficiency.get_efficiency_guard") as mock_g,
         ):
             mock_s.ENABLE_EFFICIENCY_GUARD = True
             guard = MagicMock()
@@ -1432,9 +1439,9 @@ class TestProcessIngestBackground:
         mock_result.image_count = 1
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink") as mock_unlink,
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink") as mock_unlink,
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1460,9 +1467,9 @@ class TestProcessIngestBackground:
         mock_result.error = "parse failed"
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink"),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink"),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1481,9 +1488,9 @@ class TestProcessIngestBackground:
         from app.api.routes import _process_ingest_background
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink"),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink"),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(side_effect=RuntimeError("kaboom"))
@@ -1510,9 +1517,9 @@ class TestProcessIngestBackground:
         mock_result.image_count = 0
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink", side_effect=OSError("no such file")),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink", side_effect=OSError("no such file")),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1546,9 +1553,9 @@ class TestProcessBatchFileBackground:
         mock_result.chunks = ["c1"]
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink"),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink"),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1576,9 +1583,9 @@ class TestProcessBatchFileBackground:
         mock_result.error = "unsupported"
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink"),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink"),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1600,9 +1607,9 @@ class TestProcessBatchFileBackground:
         from app.api.routes import _process_batch_file_background
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink"),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink"),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(side_effect=RuntimeError("disk error"))
@@ -1628,9 +1635,9 @@ class TestProcessBatchFileBackground:
         mock_result.chunks = []
 
         with (
-            patch("app.api.routes.get_document_processor") as mock_dp,
-            patch("app.api.routes.os.unlink", side_effect=OSError("gone")),
-            patch("app.api.routes.gc.collect"),
+            patch("app.api.routes.documents.get_document_processor") as mock_dp,
+            patch("app.api.routes.documents.os.unlink", side_effect=OSError("gone")),
+            patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
             proc.process_file = AsyncMock(return_value=mock_result)
@@ -1678,9 +1685,9 @@ class TestIngestEdgeCases:
     def test_temp_write_error_unlink_oserror(self, client):
         """When temp write fails AND os.unlink also fails (covers L229-230)."""
         with (
-            patch("app.api.routes.tempfile.mkstemp") as mock_mkstemp,
-            patch("app.api.routes.os.fdopen", side_effect=IOError("disk full")),
-            patch("app.api.routes.os.unlink", side_effect=OSError("already gone")),
+            patch("app.api.routes.documents.tempfile.mkstemp") as mock_mkstemp,
+            patch("app.api.routes.documents.os.fdopen", side_effect=IOError("disk full")),
+            patch("app.api.routes.documents.os.unlink", side_effect=OSError("already gone")),
         ):
             mock_mkstemp.return_value = (999, "/tmp/fake_path")
 
@@ -1706,7 +1713,7 @@ class TestIngestBatchEdgeCases:
     def test_batch_file_save_exception_all_fail(self, client):
         """When NamedTemporaryFile raises for all files -> 400 (covers L386-387, L390)."""
         with patch(
-            "app.api.routes.tempfile.NamedTemporaryFile",
+            "app.api.routes.documents.tempfile.NamedTemporaryFile",
             side_effect=OSError("no space"),
         ):
             resp = client.post(

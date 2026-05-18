@@ -145,7 +145,7 @@ def test_root_endpoint(client):
 def test_health_check_success(client):
     """Test health check returns success status."""
     with (
-        patch("app.api.routes.get_vector_store") as mock_get_vs,
+        patch("app.api.routes.health.get_vector_store") as mock_get_vs,
     ):
         mock_vs = MagicMock()
         mock_vs._ensure_collection = AsyncMock()
@@ -153,7 +153,7 @@ def test_health_check_success(client):
 
         response = client.get("/api/health")
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 503)
     data = response.json()
     assert data["status"] in ["healthy", "degraded"]
     assert "version" in data
@@ -161,14 +161,14 @@ def test_health_check_success(client):
 
 def test_health_check_response_structure(client):
     """Test health check response contains all expected fields."""
-    with patch("app.api.routes.get_vector_store") as mock_get_vs:
+    with patch("app.api.routes.health.get_vector_store") as mock_get_vs:
         mock_vs = MagicMock()
         mock_vs._ensure_collection = AsyncMock()
         mock_get_vs.return_value = mock_vs
 
         response = client.get("/api/health")
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 503)
     data = response.json()
     assert "status" in data
     assert "version" in data
@@ -179,14 +179,14 @@ def test_health_check_response_structure(client):
 
 def test_health_check_degraded_on_vector_store_failure(client):
     """Test health check is degraded when vector store fails."""
-    with patch("app.api.routes.get_vector_store") as mock_get_vs:
+    with patch("app.api.routes.health.get_vector_store") as mock_get_vs:
         mock_vs = MagicMock()
         mock_vs._ensure_collection = AsyncMock(side_effect=Exception("ChromaDB down"))
         mock_get_vs.return_value = mock_vs
 
         response = client.get("/api/health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
     assert data["status"] == "degraded"
     assert data["services"]["vector_store"] is False
@@ -200,7 +200,7 @@ def test_health_check_degraded_on_vector_store_failure(client):
 
 def test_ask_endpoint_success(client):
     """Test /ask endpoint returns answer from RAG pipeline."""
-    with patch("app.api.routes.get_rag_pipeline") as mock_get_rag:
+    with patch("app.api.routes.chat.get_rag_pipeline") as mock_get_rag:
         mock_rag = MagicMock()
         mock_rag.query = AsyncMock(
             return_value=_make_rag_result(
@@ -229,7 +229,7 @@ def test_ask_endpoint_success(client):
 
 def test_ask_endpoint_with_sources(client):
     """Test /ask endpoint appends source citations when sources present."""
-    with patch("app.api.routes.get_rag_pipeline") as mock_get_rag:
+    with patch("app.api.routes.chat.get_rag_pipeline") as mock_get_rag:
         mock_rag = MagicMock()
         mock_rag.query = AsyncMock(
             return_value=_make_rag_result(
@@ -264,7 +264,7 @@ def test_ask_endpoint_missing_query(client):
 
 def test_ask_endpoint_greeting_no_fetch(client):
     """Test /ask endpoint with greeting — handled by NO_FETCH policy."""
-    with patch("app.api.routes.get_rag_pipeline") as mock_get_rag:
+    with patch("app.api.routes.chat.get_rag_pipeline") as mock_get_rag:
         mock_rag = MagicMock()
         mock_rag.query = AsyncMock(
             return_value=_make_rag_result(
@@ -285,7 +285,7 @@ def test_ask_endpoint_greeting_no_fetch(client):
 
 def test_ask_endpoint_rag_failure_returns_fallback(client):
     """Test /ask endpoint returns fallback message on RAG failure."""
-    with patch("app.api.routes.get_rag_pipeline") as mock_get_rag:
+    with patch("app.api.routes.chat.get_rag_pipeline") as mock_get_rag:
         mock_rag = MagicMock()
         mock_rag.query = AsyncMock(
             return_value=_make_rag_result(answer="", sources=[], success=False)
@@ -356,7 +356,7 @@ def test_ingest_endpoint_file_size_limit(client):
 
 def test_batch_ingest_multiple_files(client):
     """Test /ingest/batch processes multiple files at once."""
-    with patch("app.api.routes.get_document_processor") as mock_get_dp:
+    with patch("app.api.routes.documents.get_document_processor") as mock_get_dp:
         mock_dp = MagicMock()
         mock_dp.process_file = AsyncMock(
             side_effect=[
@@ -389,7 +389,7 @@ def test_batch_ingest_multiple_files(client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.goals.get_orchestrator")
 def test_validate_goal_success(mock_get_orchestrator, client):
     """Test /goals/validate endpoint validates a SMART goal."""
     mock_orchestrator = MagicMock()
@@ -420,7 +420,7 @@ def test_validate_goal_success(mock_get_orchestrator, client):
     assert data["score"] == 1.0
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.goals.get_orchestrator")
 def test_validate_goal_invalid(mock_get_orchestrator, client):
     """Test /goals/validate returns proper feedback for invalid goal."""
     mock_orchestrator = MagicMock()
@@ -456,7 +456,7 @@ def test_validate_goal_invalid(mock_get_orchestrator, client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.analytics.get_orchestrator")
 def test_group_dashboard_success(mock_get_orchestrator, client):
     """Test /analytics/dashboard/group/{id} returns full dashboard data."""
     mock_orchestrator = MagicMock()
@@ -497,7 +497,7 @@ def test_group_dashboard_success(mock_get_orchestrator, client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.analytics.get_orchestrator")
 def test_individual_dashboard_success(mock_get_orchestrator, client):
     """Test /analytics/dashboard/individual/{id} returns personal dashboard."""
     mock_orchestrator = MagicMock()
@@ -537,7 +537,7 @@ def test_individual_dashboard_success(mock_get_orchestrator, client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_export_service")
+@patch("app.api.routes.analytics.get_export_service")
 def test_export_group_activity_csv(mock_get_export_service, client):
     """Test /export/activity/group/{id} returns CSV file download."""
     mock_service = MagicMock()
@@ -555,7 +555,7 @@ def test_export_group_activity_csv(mock_get_export_service, client):
     assert "Date,Student,Message" in csv_content
 
 
-@patch("app.api.routes.get_export_service")
+@patch("app.api.routes.analytics.get_export_service")
 def test_export_chat_space_csv(mock_get_export_service, client):
     """Test /export/activity/chat-space/{id} returns CSV."""
     mock_service = MagicMock()
@@ -618,7 +618,7 @@ def test_export_process_mining_csv(client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.groups.get_orchestrator")
 def test_track_participation(mock_get_orchestrator, client):
     """Test /groups/{id}/track-participation records user activity."""
     mock_orchestrator = MagicMock()
@@ -637,7 +637,7 @@ def test_track_participation(mock_get_orchestrator, client):
     assert data["success"] is True
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.groups.get_orchestrator")
 def test_update_last_message_time(mock_get_orchestrator, client):
     """Test /groups/{id}/update-last-message updates the silence timer."""
     mock_orchestrator = MagicMock()
@@ -657,7 +657,7 @@ def test_update_last_message_time(mock_get_orchestrator, client):
     assert data["success"] is True
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.groups.get_orchestrator")
 def test_set_group_topic(mock_get_orchestrator, client):
     """Test /groups/{id}/set-topic stores the discussion topic."""
     mock_orchestrator = MagicMock()
@@ -681,7 +681,7 @@ def test_set_group_topic(mock_get_orchestrator, client):
     assert data["topic"] == "Database Normalization"
 
 
-@patch("app.api.routes.get_orchestrator")
+@patch("app.api.routes.groups.get_orchestrator")
 def test_check_group_status(mock_get_orchestrator, client):
     """Test /groups/{id}/status returns group monitoring status."""
     mock_orchestrator = MagicMock()
@@ -707,8 +707,8 @@ def test_check_group_status(mock_get_orchestrator, client):
 # ==============================================================================
 
 
-@patch("app.api.routes.get_efficiency_guard")
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.get_efficiency_guard")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_cache_statistics(mock_settings, mock_get_guard, client):
     """Test /efficiency/cache/statistics returns cache performance metrics."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = True
@@ -731,8 +731,8 @@ def test_efficiency_cache_statistics(mock_settings, mock_get_guard, client):
     assert data["hit_rate_percent"] == 66.67
 
 
-@patch("app.api.routes.get_efficiency_guard")
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.get_efficiency_guard")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_cache_clear(mock_settings, mock_get_guard, client):
     """Test /efficiency/cache/clear removes all cached entries."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = True
@@ -750,8 +750,8 @@ def test_efficiency_cache_clear(mock_settings, mock_get_guard, client):
     mock_guard.clear_cache.assert_called_once()
 
 
-@patch("app.api.routes.get_efficiency_guard")
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.get_efficiency_guard")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_statistics_full(mock_settings, mock_get_guard, client):
     """Test /efficiency/statistics returns comprehensive stats."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = True
@@ -772,8 +772,8 @@ def test_efficiency_statistics_full(mock_settings, mock_get_guard, client):
     assert "cache" in data
 
 
-@patch("app.api.routes.get_efficiency_guard")
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.get_efficiency_guard")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_rate_limit_info(mock_settings, mock_get_guard, client):
     """Test /efficiency/rate-limit/info returns rate limit data."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = True
@@ -797,8 +797,8 @@ def test_efficiency_rate_limit_info(mock_settings, mock_get_guard, client):
     assert data["remaining_requests"] == 85
 
 
-@patch("app.api.routes.get_efficiency_guard")
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.get_efficiency_guard")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_high_frequency_queries(mock_settings, mock_get_guard, client):
     """Test /efficiency/queries/high-frequency returns top queries."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = True
@@ -822,7 +822,7 @@ def test_efficiency_high_frequency_queries(mock_settings, mock_get_guard, client
     assert queries[0]["frequency"] == 42
 
 
-@patch("app.api.routes.settings")
+@patch("app.api.routes.efficiency.settings")
 def test_efficiency_endpoints_disabled(mock_settings, client):
     """Test efficiency endpoints return disabled message when guard is off."""
     mock_settings.ENABLE_EFFICIENCY_GUARD = False
@@ -841,7 +841,7 @@ def test_efficiency_endpoints_disabled(mock_settings, client):
 
 def test_analyze_engagement_endpoint(client):
     """Test /analytics/engagement endpoint returns NLP metrics."""
-    with patch("app.api.routes.get_engagement_analyzer") as mock_get_analyzer:
+    with patch("app.api.routes.analytics.get_engagement_analyzer") as mock_get_analyzer:
         from app.services.nlp_analytics import (
             EngagementAnalysis,
             EngagementType,

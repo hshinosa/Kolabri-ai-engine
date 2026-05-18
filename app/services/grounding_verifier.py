@@ -40,14 +40,18 @@ class GroundingVerifier:
     3. Block if grounding_ratio < threshold
     """
 
-    DEFAULT_CLAIM_THRESHOLD = 0.65
-    DEFAULT_OVERALL_THRESHOLD = 0.7
+    DEFAULT_CLAIM_THRESHOLD = 0.45
+    DEFAULT_OVERALL_THRESHOLD = 0.4
 
     NON_FACTUAL_PATTERNS = [
         r'^(maaf|sorry|saya tidak)',
         r'\?$',
         r'^(mungkin|barangkali|sepertinya)',
         r'^(silakan|coba|cobalah)',
+        r'^(pertanyaan socratic|pertanyaan lanjutan)',
+        r'^(menurut kamu|menurut kalian)',
+        r'^(ya,?\s+pertanyaan)',
+        r'^\d+\.\s*\*\*',
     ]
 
     def __init__(self, embedding_service=None):
@@ -61,8 +65,14 @@ class GroundingVerifier:
         return self._embedding_service
 
     def _extract_claims(self, response: str) -> List[str]:
-        sentences = re.split(r'[.!?]\s+', response.strip())
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+        cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', response)
+        cleaned = re.sub(r'\*([^*]+)\*', r'\1', cleaned)
+        cleaned = re.sub(r'📚.*$', '', cleaned, flags=re.MULTILINE | re.DOTALL)
+        cleaned = re.sub(r'^[-•]\s*', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\d+\.\s*', '', cleaned, flags=re.MULTILINE)
+
+        sentences = re.split(r'[.!?]\s+|\n\n+', cleaned.strip())
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
 
         claims = []
         for sentence in sentences:
@@ -207,24 +217,39 @@ class GroundingVerifier:
             doc.get("content", doc.get("page_content", ""))
             for doc in documents
         ]
+        all_context = " ".join(doc_contents)
 
         grounded_claims = []
         ungrounded_claims = []
 
         for claim in claims:
-            max_similarity = 0.0
+            embedding_sim = 0.0
             for doc_content in doc_contents:
                 sim = await self._compute_similarity_async(claim, doc_content)
-                max_similarity = max(max_similarity, sim)
+                embedding_sim = max(embedding_sim, sim)
 
-            if max_similarity >= per_claim_threshold:
+            keyword_sim = self._compute_similarity(claim, all_context)
+
+            hybrid_score = 0.7 * embedding_sim + 0.3 * keyword_sim
+
+            if hybrid_score >= per_claim_threshold:
                 grounded_claims.append(claim)
             else:
                 ungrounded_claims.append(claim)
 
         grounding_ratio = len(grounded_claims) / len(claims)
         is_grounded = grounding_ratio >= overall_threshold
-        confidence = min(abs(grounding_ratio - overall_threshold) / overall_threshold + 0.5, 1.0)
+
+        confidence = min(abs(grounding_ratio - overall_threshold) / max(overall_threshold, 0.01) + 0.5, 1.0)
+
+        logger.info(
+            "grounding_verification_complete",
+            is_grounded=is_grounded,
+            ratio=round(grounding_ratio, 3),
+            total_claims=len(claims),
+            grounded=len(grounded_claims),
+            ungrounded=len(ungrounded_claims),
+        )
 
         return GroundingResult(
             is_grounded=is_grounded, grounding_ratio=grounding_ratio,

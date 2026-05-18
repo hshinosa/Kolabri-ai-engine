@@ -23,6 +23,7 @@ from app.services.logic_listener import get_logic_listener
 from app.services.notification_service import get_notification_service
 from app.services.rag import get_rag_pipeline
 from app.services.conformance_checker import ConformanceChecker
+from app.services.llm import LLMDegradedError
 
 # Setup logging
 setup_logging()
@@ -157,6 +158,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 from app.middleware.request_size_limit import LimitRequestSizeMiddleware
 app.add_middleware(LimitRequestSizeMiddleware, max_size_bytes=10*1024*1024)
 
+from app.middleware.request_id import RequestIDMiddleware, REQUEST_ID_HEADER
+app.add_middleware(RequestIDMiddleware)
+
 # ✅ SEC: KOL-142 - Authentication Middleware for sensitive routes
 from app.middleware.auth import require_auth
 from fastapi import Depends
@@ -167,54 +171,101 @@ app.include_router(api_router, prefix="/api", dependencies=[Depends(require_auth
 
 
 # ✅ SEC: KOL-145 - Exception Handlers for sanitized error responses
+def _request_id_for(request: Request) -> str:
+    rid = getattr(request.state, "request_id", None)
+    if rid:
+        return rid
+    import uuid as _uuid
+    return str(_uuid.uuid4())
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle all unhandled exceptions with sanitized response."""
+    request_id = _request_id_for(request)
     logger.error(
         "Unhandled exception",
         exc_info=exc,
         path=request.url.path,
-        method=request.method
+        method=request.method,
     )
     return JSONResponse(
         status_code=500,
         content={
             "detail": "INTERNAL_SERVER_ERROR",
-            "message": "An internal error occurred. Please try again later."
-        }
+            "outcome": "terminal",
+            "message": "An internal error occurred. Please try again later.",
+            "request_id": request_id,
+        },
+        headers={REQUEST_ID_HEADER: request_id},
     )
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions with sanitized response."""
+    request_id = _request_id_for(request)
     logger.warning(
         "HTTP exception",
         status_code=exc.status_code,
         detail=str(exc.detail),
-        path=request.url.path
+        path=request.url.path,
     )
+    body: dict = {
+        "detail": "REQUEST_ERROR",
+        "message": str(exc.detail) if exc.status_code < 500 else "An error occurred",
+        "request_id": request_id,
+    }
+    if exc.status_code >= 500:
+        body["outcome"] = "terminal"
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "detail": "REQUEST_ERROR",
-            "message": str(exc.detail) if exc.status_code < 500 else "An error occurred"
-        }
+        content=body,
+        headers={REQUEST_ID_HEADER: request_id},
     )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors with sanitized response."""
+    request_id = _request_id_for(request)
     logger.warning(
         "Validation error",
         errors=str(exc.errors()),
-        path=request.url.path
+        path=request.url.path,
     )
     return JSONResponse(
         status_code=422,
         content={
             "detail": "VALIDATION_ERROR",
-            "message": "Invalid request data. Please check your input."
-        }
+            "message": "Invalid request data. Please check your input.",
+            "request_id": request_id,
+        },
+        headers={REQUEST_ID_HEADER: request_id},
+    )
+
+@app.exception_handler(LLMDegradedError)
+async def llm_degraded_exception_handler(request: Request, exc: LLMDegradedError):
+    """Map LLM degraded errors to HTTP 503 with structured outcome."""
+    request_id = _request_id_for(request)
+    logger.warning(
+        "llm_degraded_outcome",
+        reason=exc.reason,
+        retry_after=exc.retry_after,
+        path=request.url.path,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "DEGRADED",
+            "outcome": "degraded",
+            "reason": exc.reason,
+            "message": "AI provider is temporarily unavailable. Please retry shortly.",
+            "retry_after": exc.retry_after,
+            "request_id": request_id,
+        },
+        headers={
+            REQUEST_ID_HEADER: request_id,
+            "Retry-After": str(exc.retry_after),
+        },
     )
 
 
@@ -230,10 +281,14 @@ async def root():
 
 
 if __name__ == "__main__":
+    workers = int(settings.WORKERS) if hasattr(settings, 'WORKERS') else 1
     uvicorn.run(
         "main:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
+        workers=1 if settings.DEBUG else workers,
         log_level=settings.LOG_LEVEL.lower(),
+        limit_concurrency=100,
+        timeout_keep_alive=30,
     )

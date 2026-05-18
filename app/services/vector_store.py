@@ -106,6 +106,7 @@ class VectorStoreService:
         collection_name: Optional[str] = None,
         n_results: int = 5,
         where: Optional[Dict[str, Any]] = None,
+        score_threshold: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         target_collection = collection_name or "default"
 
@@ -116,6 +117,9 @@ class VectorStoreService:
             return []
 
         query_embedding = await self._embedding_service.embed_query(query)
+        effective_score_threshold = (
+            settings.SIMILARITY_THRESHOLD if score_threshold is None else score_threshold
+        )
 
         query_filter = None
         if where:
@@ -134,6 +138,8 @@ class VectorStoreService:
 
         formatted = []
         for point in results.points:
+            if point.score < effective_score_threshold:
+                continue
             payload = point.payload or {}
             content = payload.pop("content", "")
             formatted.append({
@@ -150,6 +156,7 @@ class VectorStoreService:
         course_id: str,
         query_text: str,
         n_results: int = None,
+        score_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         if n_results is None:
             n_results = settings.TOP_K_RESULTS
@@ -159,6 +166,7 @@ class VectorStoreService:
             query=query_text,
             collection_name=collection_name,
             n_results=n_results,
+            score_threshold=score_threshold,
         )
 
         documents = [[r["content"] for r in results]]

@@ -171,7 +171,8 @@ class DocumentProcessor:
         self._processed_hashes: Dict[str, str] = {}  # hash -> document_id
 
         if self.ocr_available:
-            self._initialize_ocr_engine()
+            from app.services.document_processing.image_extraction import initialize_ocr_engine
+            self._ocr_engine = initialize_ocr_engine()
 
         if self.vision_available and getattr(settings, "GEMINI_API_KEY", "") and genai:
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -680,123 +681,20 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
         file_path: Optional[str] = None,
     ) -> ProcessedDocument:
-        """
-        Process PDF with text and SELECTIVE image extraction.
-
-        OPTIMIZED:
-        - Opens PDF from disk path when available (avoids RAM duplication)
-        - Only runs OCR if page text is below threshold
-        - Limits number of images processed per page
-        - Resizes large images before OCR
-        - Uses thread pool for OCR operations
-        """
-        chunks: List[ProcessedChunk] = []
-        all_text = []
-        image_count = 0
-
-        # Open PDF: prefer file_path (disk) over stream (RAM)
-        if file_path is not None:
-            pdf_doc = fitz.open(filename=file_path)
-        elif content is not None:
-            pdf_doc = fitz.open(stream=content, filetype="pdf")
-        else:
-            raise ValueError(
-                "Either content or file_path must be provided for PDF processing"
-            )
-        page_count = len(pdf_doc)
-
-        for page_num, page in enumerate(pdf_doc, start=1):
-            page_text_parts = []
-
-            # Extract text from page
-            text = page.get_text("text")
-            text_length = len(text.strip()) if text else 0
-
-            if text.strip():
-                page_text_parts.append(text.strip())
-
-            # SELECTIVE OCR: Only if text extraction yielded little content
-            should_ocr = (
-                self.ocr_available and text_length < self.MIN_TEXT_LENGTH_FOR_OCR
-            )
-
-            if should_ocr:
-                ocr_text = await self._run_page_ocr(page)
-                if ocr_text:
-                    page_text_parts.append(f"[OCR]: {ocr_text.strip()}")
-                    image_count += 1
-
-            # [NEW] MULTIMODAL: Extract images and generate captions
-            if self.vision_available:
-                image_list = page.get_images(full=True)
-                for img_index, img in enumerate(image_list[: self.MAX_IMAGES_PER_PAGE]):
-                    pil_img = None
-                    try:
-                        xref = img[0]
-                        base_image = pdf_doc.extract_image(xref)
-                        image_bytes = base_image["image"]
-
-                        pil_img = Image.open(io.BytesIO(image_bytes))
-                        if (
-                            pil_img.width < settings.MIN_IMAGE_WIDTH
-                            or pil_img.height < settings.MIN_IMAGE_HEIGHT
-                        ):
-                            pil_img.close()
-                            del pil_img, image_bytes, base_image
-                            pil_img = None
-                            continue
-
-                        logger.info(
-                            "analyzing_pdf_image", page=page_num, img_index=img_index
-                        )
-                        caption = await self._generate_image_caption(pil_img)
-
-                        if caption:
-                            formatted_caption = (
-                                f"\n\n=== [GAMBAR VISUAL DI HALAMAN {page_num}] ===\n"
-                                f"Deskripsi: {caption}\n"
-                                f"=============================================\\n\n"
-                            )
-                            page_text_parts.append(formatted_caption)
-                            image_count += 1
-                    except Exception as e:
-                        logger.warning(
-                            "pdf_image_extraction_failed", page=page_num, error=str(e)
-                        )
-                    finally:
-                        # Aggressively free image memory per iteration
-                        if pil_img is not None:
-                            pil_img.close()
-                            del pil_img
-                        gc.collect()
-
-            # Combine all text from page
-            page_text = "\n\n".join(page_text_parts)
-            if page_text:
-                all_text.append(page_text)
-
-                # Create chunks for this page
-                page_chunks = self._create_chunks(
-                    text=page_text,
-                    document_id=document_id,
-                    filename=filename,
-                    page_number=page_num,
-                    metadata=metadata,
-                )
-                chunks.extend(page_chunks)
-
-        pdf_doc.close()
-        gc.collect()
-
-        return ProcessedDocument(
-            filename=filename,
-            file_type="pdf",
-            chunks=chunks,
-            page_count=page_count,
-            image_count=image_count,
-            total_characters=sum(len(c.text) for c in chunks),
-            processing_time_ms=0,
-            success=True,
+        from app.services.document_processing.text_extraction import process_pdf
+        return await process_pdf(
+            content, filename, document_id, metadata, file_path,
+            ocr_available=self.ocr_available,
+            vision_available=self.vision_available,
+            min_text_length_for_ocr=self.MIN_TEXT_LENGTH_FOR_OCR,
+            max_images_per_page=self.MAX_IMAGES_PER_PAGE,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            min_image_width=settings.MIN_IMAGE_WIDTH,
+            min_image_height=settings.MIN_IMAGE_HEIGHT,
+            ocr_fn=self._run_page_ocr,
+            caption_fn=self._generate_image_caption,
+            _fitz=fitz,
         )
 
     async def _process_docx(
@@ -806,68 +704,15 @@ class DocumentProcessor:
         document_id: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
-        """Process DOCX (Microsoft Word) document."""
-        doc = DocxDocument(io.BytesIO(content))
-
-        # Extract all paragraphs
-        paragraphs = []
-        for para in doc.paragraphs:
-            if para.text.strip():
-                paragraphs.append(para.text.strip())
-
-        # Extract text from tables
-        for table in doc.tables:
-            for row in table.rows:
-                row_text = " | ".join(
-                    cell.text.strip() for cell in row.cells if cell.text.strip()
-                )
-                if row_text:
-                    paragraphs.append(row_text)
-
-        full_text = "\n\n".join(paragraphs)
-
-        # [NEW] Extract images from DOCX — one at a time (generator)
-        image_count = 0
-        try:
-            ocr_texts = []
-            processed = 0
-            for img in self._extract_images_from_docx(content):
-                if processed >= 5:
-                    img.close()
-                    break
-                try:
-                    text = await self._run_ocr_optimized(img)
-                    if text:
-                        ocr_texts.append(f"[IMAGE_OCR]: {text}")
-                finally:
-                    img.close()
-                    del img
-                    gc.collect()
-                processed += 1
-            if ocr_texts:
-                full_text += "\n\n" + "\n\n".join(ocr_texts)
-                image_count = len(ocr_texts)
-        except Exception as e:
-            logger.warning("docx_image_extraction_failed", error=str(e))
-
-        # Create chunks
-        chunks = self._create_chunks(
-            text=full_text,
-            document_id=document_id,
-            filename=filename,
-            page_number=1,  # DOCX doesn't have pages in the same way
-            metadata=metadata,
-        )
-
-        return ProcessedDocument(
-            filename=filename,
-            file_type="docx",
-            chunks=chunks,
-            page_count=1,
-            image_count=image_count,
-            total_characters=sum(len(c.text) for c in chunks),
-            processing_time_ms=0,
-            success=True,
+        from app.services.document_processing.text_extraction import process_docx
+        return await process_docx(
+            content, filename, document_id, metadata,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            ocr_available=self.ocr_available,
+            ocr_fn=self._run_ocr_optimized,
+            _DocxDocument=DocxDocument,
+            _extract_images_fn=self._extract_images_from_docx,
         )
 
     async def _process_pptx(
@@ -877,72 +722,14 @@ class DocumentProcessor:
         document_id: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
-        """Process PPTX (Microsoft PowerPoint) presentation."""
-        prs = Presentation(io.BytesIO(content))
-
-        chunks: List[ProcessedChunk] = []
-        total_chars = 0
-        image_count = 0
-
-        for slide_num, slide in enumerate(prs.slides, start=1):
-            slide_text_parts = []
-
-            # Extract text from all shapes
-            for shape in slide.shapes:
-                if hasattr(shape, "text") and shape.text.strip():
-                    slide_text_parts.append(shape.text.strip())
-
-                # Extract from tables
-                if shape.has_table:
-                    for row in shape.table.rows:
-                        row_text = " | ".join(
-                            cell.text.strip() for cell in row.cells if cell.text.strip()
-                        )
-                        if row_text:
-                            slide_text_parts.append(row_text)
-
-                # [NEW] Extract and OCR images from PPTX shapes
-                if shape.shape_type == 13:  # Picture
-                    img = None
-                    try:
-                        image_data = shape.image.blob
-                        img = Image.open(io.BytesIO(image_data))
-                        del image_data
-                        ocr_text = await self._run_ocr_optimized(img)
-                        if ocr_text:
-                            slide_text_parts.append(f"[IMAGE_OCR]: {ocr_text}")
-                            image_count += 1
-                    except Exception as e:
-                        logger.warning("pptx_image_ocr_failed", error=str(e))
-                    finally:
-                        if img is not None:
-                            img.close()
-                            del img
-                        gc.collect()
-
-            slide_text = "\n".join(slide_text_parts)
-            if slide_text:
-                total_chars += len(slide_text)
-
-                # Create chunks for this slide
-                slide_chunks = self._create_chunks(
-                    text=slide_text,
-                    document_id=document_id,
-                    filename=filename,
-                    page_number=slide_num,
-                    metadata={**(metadata or {}), "slide_number": slide_num},
-                )
-                chunks.extend(slide_chunks)
-
-        return ProcessedDocument(
-            filename=filename,
-            file_type="pptx",
-            chunks=chunks,
-            page_count=len(prs.slides),
-            image_count=image_count,
-            total_characters=total_chars,
-            processing_time_ms=0,
-            success=True,
+        from app.services.document_processing.text_extraction import process_pptx
+        return await process_pptx(
+            content, filename, document_id, metadata,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            ocr_available=self.ocr_available,
+            ocr_fn=self._run_ocr_optimized,
+            _Presentation=Presentation,
         )
 
     async def _process_text(
@@ -953,37 +740,11 @@ class DocumentProcessor:
         file_type: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
-        """Process plain text or markdown files."""
-        # Try different encodings
-        text = None
-        for encoding in ["utf-8", "utf-16", "latin-1", "cp1252"]:
-            try:
-                text = content.decode(encoding)
-                break
-            except UnicodeDecodeError:
-                continue
-
-        if text is None:
-            raise ValueError("Unable to decode text file with supported encodings")
-
-        # Create chunks
-        chunks = self._create_chunks(
-            text=text,
-            document_id=document_id,
-            filename=filename,
-            page_number=1,
-            metadata=metadata,
-        )
-
-        return ProcessedDocument(
-            filename=filename,
-            file_type=file_type,
-            chunks=chunks,
-            page_count=1,
-            image_count=0,
-            total_characters=len(text),
-            processing_time_ms=0,
-            success=True,
+        from app.services.document_processing.text_extraction import process_text
+        return await process_text(
+            content, filename, document_id, file_type, metadata,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
         )
 
     async def _process_image(
@@ -993,47 +754,26 @@ class DocumentProcessor:
         document_id: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
-        """Process a raw image file using Gemini Vision."""
         if not self.vision_available:
             return ProcessedDocument(
-                filename=filename,
-                file_type="image",
-                chunks=[],
-                page_count=0,
-                image_count=0,
-                total_characters=0,
-                processing_time_ms=0,
-                success=False,
-                error="Multimodal/Vision processing is disabled or unavailable",
+                filename=filename, file_type="image", chunks=[], page_count=0,
+                image_count=0, total_characters=0, processing_time_ms=0,
+                success=False, error="Multimodal/Vision processing is disabled or unavailable",
             )
-
         img = None
         try:
             img = Image.open(io.BytesIO(content))
             caption = await self._generate_image_caption(img)
-
             if not caption:
                 raise ValueError("Vision AI failed to generate caption for image")
-
             full_text = f"=== [GAMBAR: {filename}] ===\nDeskripsi Visual: {caption}\n========================"
-
             chunks = self._create_chunks(
-                text=full_text,
-                document_id=document_id,
-                filename=filename,
-                page_number=1,
-                metadata={**(metadata or {}), "is_multimodal": True},
+                text=full_text, document_id=document_id, filename=filename,
+                page_number=1, metadata={**(metadata or {}), "is_multimodal": True},
             )
-
             return ProcessedDocument(
-                filename=filename,
-                file_type="image",
-                chunks=chunks,
-                page_count=1,
-                image_count=1,
-                total_characters=len(full_text),
-                processing_time_ms=0,
-                success=True,
+                filename=filename, file_type="image", chunks=chunks, page_count=1,
+                image_count=1, total_characters=len(full_text), processing_time_ms=0, success=True,
             )
         except Exception as e:
             logger.error("image_processing_failed", filename=filename, error=str(e))
@@ -1045,30 +785,23 @@ class DocumentProcessor:
             gc.collect()
 
     async def _generate_image_caption(self, image: Image.Image) -> str:
-        """Generate description for an image using Gemini Vision."""
         if not self._vision_model and not self._vision_client:
             return ""
-
         try:
-            prompt = """
-            Analisis gambar ini secara detail untuk keperluan materi kuliah.
-            1. Jika ini DIAGRAM/SKEMA: Jelaskan alur dan komponennya.
-            2. Jika ini GRAFIK: Jelaskan sumbu X/Y, tren, dan titik penting.
-            3. Jika ini RUMUS: Tuliskan dalam format LaTeX.
-            4. Abaikan jika gambar buram atau tidak bermakna.
-            
-            Outputkan hanya deskripsinya saja dalam Bahasa Indonesia.
-            """
-
-            # Convert to JPEG bytes to release PIL image reference during API call
+            prompt = (
+                "Analisis gambar ini secara detail untuk keperluan materi kuliah.\n"
+                "1. Jika ini DIAGRAM/SKEMA: Jelaskan alur dan komponennya.\n"
+                "2. Jika ini GRAFIK: Jelaskan sumbu X/Y, tren, dan titik penting.\n"
+                "3. Jika ini RUMUS: Tuliskan dalam format LaTeX.\n"
+                "4. Abaikan jika gambar buram atau tidak bermakna.\n\n"
+                "Outputkan hanya deskripsinya saja dalam Bahasa Indonesia."
+            )
             img_buffer = io.BytesIO()
             prepared_image = image.convert("RGB") if image.mode != "RGB" else image
             prepared_image.save(img_buffer, format="JPEG", quality=85)
             img_bytes = img_buffer.getvalue()
             img_buffer.close()
-
             loop = asyncio.get_running_loop()
-
             if self._vision_model:
                 response = await loop.run_in_executor(
                     _thread_pool,
@@ -1077,58 +810,34 @@ class DocumentProcessor:
                 if prepared_image is not image:
                     prepared_image.close()
                 return getattr(response, "text", "").strip()
-
             import base64
-
             base64_image = base64.b64encode(img_bytes).decode("utf-8")
             response = await loop.run_in_executor(
                 _thread_pool,
                 lambda: self._vision_client.chat.completions.create(
                     model=settings.GEMINI_VISION_MODEL,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64_image}"
-                                    },
-                                },
-                            ],
-                        }
-                    ],
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+                        ],
+                    }],
                     max_tokens=500,
                 ),
             )
-
             if prepared_image is not image:
                 prepared_image.close()
-
             return response.choices[0].message.content.strip()
         except Exception as e:
             logger.warning("vision_api_failed", error=str(e))
             return ""
 
     def _extract_images_from_docx(self, doc_content: bytes):
-        """Extract images from DOCX bytes one at a time (generator to save RAM)."""
-        try:
-            with zipfile.ZipFile(io.BytesIO(doc_content)) as doc_zip:
-                for name in doc_zip.namelist():
-                    if name.startswith("word/media/"):
-                        try:
-                            image_data = doc_zip.read(name)
-                            img = Image.open(io.BytesIO(image_data))
-                            del image_data
-                            yield img
-                        except Exception:
-                            continue
-        except Exception as e:
-            logger.warning("docx_extract_media_failed", error=str(e))
+        from app.services.document_processing.text_extraction import _extract_images_from_docx
+        yield from _extract_images_from_docx(doc_content)
 
     async def _process_extracted_images(self, images: List[Image.Image]) -> str:
-        """Process multiple images with OCR and return combined text."""
         combined_text = []
         for img in images:
             try:
@@ -1142,16 +851,11 @@ class DocumentProcessor:
         return "\n\n".join(combined_text)
 
     def _initialize_ocr_engine(self) -> None:
-        """Instantiate PaddleOCR once to avoid repeated heavyweight setup."""
         if self._ocr_engine is not None or not OCR_AVAILABLE:
             return
-
         try:
             lang = getattr(settings, "OCR_LANGUAGE", None) or "en"
-            self._ocr_engine = PaddleOCR(
-                use_angle_cls=True,
-                lang=lang,
-            )
+            self._ocr_engine = PaddleOCR(use_angle_cls=True, lang=lang)
             logging.getLogger("ppocr").setLevel(logging.ERROR)
             logger.info("PaddleOCR initialized", lang=lang)
         except Exception as exc:
@@ -1160,18 +864,14 @@ class DocumentProcessor:
             logger.error("Failed to initialize PaddleOCR", error=str(exc))
 
     async def _run_ocr(self, image: Image.Image) -> str:
-        """Run OCR on an image using PaddleOCR."""
         return await self._run_ocr_optimized(image)
 
     def _run_paddle_ocr(self, image: Image.Image) -> str:
-        """Synchronous helper that executes PaddleOCR on a prepared PIL image."""
         if not self._ocr_engine:
             self._initialize_ocr_engine()
-
         engine = self._ocr_engine
         if engine is None:
             return ""
-
         try:
             np_image = np.array(image)
             result = engine.ocr(np_image, cls=True)
@@ -1179,16 +879,13 @@ class DocumentProcessor:
             logger.debug("ocr_failed", error=str(exc))
             return ""
         finally:
-            # Free the numpy copy immediately
             try:
                 del np_image
             except NameError:
                 pass
-
         if not result:
             return ""
-
-        lines: List[str] = []
+        lines = []
         for line in result:
             for _, (text, confidence) in line:
                 if not text:
@@ -1196,69 +893,48 @@ class DocumentProcessor:
                 if confidence is not None and confidence < 0.4:
                     continue
                 lines.append(text.strip())
-
         return "\n".join(lines).strip()
 
     async def _run_ocr_optimized(self, image: Image.Image) -> str:
-        """
-        Run OCR on an image using PaddleOCR with memory and latency optimizations.
-
-        Optimizations:
-        - Resizes large images to reduce processing time
-        - Uses thread pool to avoid blocking the event loop
-        - Normalizes color space for consistent OCR results
-        """
         if not self.ocr_available:
             return ""
-
         try:
-            # Operate directly on the passed image to avoid RAM duplication
             if (
                 image.width > self.MAX_IMAGE_SIZE[0]
                 or image.height > self.MAX_IMAGE_SIZE[1]
             ):
                 image.thumbnail(self.MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
-
             original_image = image
             if image.mode != "RGB":
                 image = image.convert("RGB")
-                # Close the original non-RGB image to free RAM
                 original_image.close()
                 del original_image
-
             loop = asyncio.get_running_loop()
             text = await loop.run_in_executor(
                 _thread_pool, lambda: self._run_paddle_ocr(image)
             )
-
             return text.strip()
         except Exception as e:
             logger.debug("ocr_failed", error=str(e))
             return ""
 
     async def _run_page_ocr(self, page: fitz.Page) -> str:
-        """Render a PDF page to image and run OCR (used when text extraction fails)."""
         if not self.ocr_available:
             return ""
-
         def render_page() -> Optional[Image.Image]:
             try:
-                # Render page at ~112 DPI (reduced from 150 DPI to save RAM)
                 matrix = fitz.Matrix(1.5, 1.5)
                 pix = page.get_pixmap(matrix=matrix, alpha=False)
-                mode = "RGB"
-                image = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+                image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 pix = None
                 return image
             except Exception as exc:
                 logger.debug("page_render_failed", error=str(exc))
                 return None
-
         loop = asyncio.get_running_loop()
         image = await loop.run_in_executor(_thread_pool, render_page)
         if image is None:
             return ""
-
         try:
             text = await self._run_ocr_optimized(image)
             return text
@@ -1274,99 +950,27 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[ProcessedChunk]:
         """Create overlapping chunks from text."""
-        chunks = []
+        from app.services.document_processing import create_chunks as _create
 
-        # Clean text
-        text = self._clean_text(text)
-
-        if not text:
-            return chunks
-
-        # If text is smaller than chunk size, return as single chunk
-        if len(text) <= self.chunk_size:
-            chunk_id = f"{document_id}_p{page_number}_c0"
-            chunks.append(
-                ProcessedChunk(
-                    text=text,
-                    metadata={
-                        **(metadata or {}),
-                        "document_id": document_id,
-                        "source": filename,
-                        "page": page_number,
-                        "chunk_index": 0,
-                        "chunk_count": 1,
-                    },
-                    chunk_id=chunk_id,
-                )
-            )
-            return chunks
-
-        # Split into overlapping chunks
-        start = 0
-        chunk_index = 0
-
-        while start < len(text):
-            end = min(start + self.chunk_size, len(text))
-
-            # Try to break at sentence or paragraph boundary
-            if end < len(text):
-                # Look for good break points
-                for separator in ["\n\n", ". ", ".\n", "? ", "! ", "\n"]:
-                    last_sep = text.rfind(separator, start + self.chunk_size // 2, end)
-                    if last_sep > start:
-                        end = last_sep + len(separator)
-                        break
-
-            chunk_text = text[start:end].strip()
-
-            if chunk_text:
-                chunk_id = f"{document_id}_p{page_number}_c{chunk_index}"
-                chunks.append(
-                    ProcessedChunk(
-                        text=chunk_text,
-                        metadata={
-                            **(metadata or {}),
-                            "document_id": document_id,
-                            "source": filename,
-                            "page": page_number,
-                            "chunk_index": chunk_index,
-                            "char_start": start,
-                            "char_end": end,
-                        },
-                        chunk_id=chunk_id,
-                    )
-                )
-                chunk_index += 1
-
-            # Move to next position with overlap
-            # Guard against infinite loop: start must always advance
-            new_start = end - self.chunk_overlap
-            if new_start <= start:
-                # Overlap would go backwards or stay same — force advance past end
-                start = end
-            else:
-                start = new_start
-            if start >= len(text):
-                break
-
-        # Update chunk count in all metadata
-        for chunk in chunks:
-            chunk.metadata["chunk_count"] = len(chunks)
-
-        return chunks
+        specs = _create(
+            text=text,
+            document_id=document_id,
+            filename=filename,
+            page_number=page_number,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            metadata=metadata,
+        )
+        return [
+            ProcessedChunk(text=s.text, metadata=s.metadata, chunk_id=s.chunk_id)
+            for s in specs
+        ]
 
     def _clean_text(self, text: str) -> str:
         """Clean and normalize text."""
-        # Remove excessive whitespace
-        text = re.sub(r"\s+", " ", text)
+        from app.services.document_processing import clean_text
 
-        # Remove control characters except newlines
-        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-
-        # Normalize newlines
-        text = re.sub(r"\n{3,}", "\n\n", text)
-
-        return text.strip()
+        return clean_text(text)
 
     async def _store_chunks(
         self,

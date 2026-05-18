@@ -29,39 +29,81 @@ app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
-@patch('app.services.llm.get_llm_service')
-@patch('app.api.routes.get_vector_store')
-@patch('app.api.routes.get_llm_service')
-def test_health_check_healthy(mock_llm, mock_vs, mock_llm_svc):
+@patch('app.api.routes.health.get_reranker')
+@patch('app.api.routes.health.get_vector_store')
+def test_health_check_healthy(mock_vs, mock_reranker):
     mock_vs_instance = MagicMock()
     mock_vs_instance._ensure_collection = AsyncMock()
     mock_vs.return_value = mock_vs_instance
-    
-    mock_llm_instance = MagicMock()
-    mock_llm_instance.model = "test-model"
-    mock_llm.return_value = mock_llm_instance
-    mock_llm_svc.return_value = mock_llm_instance
-    
-    response = client.get("/health")
+
+    mock_reranker_instance = MagicMock()
+    mock_reranker_instance.is_available.return_value = True
+    mock_reranker.return_value = mock_reranker_instance
+
+    with patch('app.services.llm.get_llm_service') as mock_llm, \
+         patch('app.services.mongodb_logger.get_mongo_logger') as mock_mongo, \
+         patch('app.core.redis_cache.get_redis_cache') as mock_redis, \
+         patch('app.services.circuit_breaker.get_llm_circuit_breaker') as mock_cb:
+
+        mock_llm_instance = MagicMock()
+        mock_llm_instance.model = "test-model"
+        mock_llm.return_value = mock_llm_instance
+
+        mock_mongo_instance = MagicMock()
+        mock_mongo_instance.enabled = False
+        mock_mongo.return_value = mock_mongo_instance
+
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.ping = AsyncMock(return_value=True)
+        mock_redis.return_value = mock_redis_instance
+
+        mock_cb_instance = MagicMock()
+        mock_cb_instance.state.value = "closed"
+        mock_cb.return_value = mock_cb_instance
+
+        response = client.get("/health")
+
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@patch('app.api.routes.get_vector_store')
-@patch('app.api.routes.get_llm_service')
-def test_health_check_degraded(mock_llm, mock_vs):
+@patch('app.api.routes.health.get_reranker')
+@patch('app.api.routes.health.get_vector_store')
+def test_health_check_degraded(mock_vs, mock_reranker):
     mock_vs_instance = MagicMock()
     mock_vs_instance._ensure_collection = AsyncMock(side_effect=Exception("Failed"))
     mock_vs.return_value = mock_vs_instance
-    
-    mock_llm_instance = MagicMock()
-    mock_llm_instance.model = None
-    mock_llm.return_value = mock_llm_instance
-    
-    response = client.get("/health")
-    assert response.status_code == 200
+
+    mock_reranker_instance = MagicMock()
+    mock_reranker_instance.is_available.return_value = False
+    mock_reranker.return_value = mock_reranker_instance
+
+    with patch('app.services.llm.get_llm_service') as mock_llm, \
+         patch('app.services.mongodb_logger.get_mongo_logger') as mock_mongo, \
+         patch('app.core.redis_cache.get_redis_cache') as mock_redis, \
+         patch('app.services.circuit_breaker.get_llm_circuit_breaker') as mock_cb:
+
+        mock_llm_instance = MagicMock()
+        mock_llm_instance.model = None
+        mock_llm.return_value = mock_llm_instance
+
+        mock_mongo_instance = MagicMock()
+        mock_mongo_instance.enabled = False
+        mock_mongo.return_value = mock_mongo_instance
+
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.ping = AsyncMock(return_value=True)
+        mock_redis.return_value = mock_redis_instance
+
+        mock_cb_instance = MagicMock()
+        mock_cb_instance.state.value = "closed"
+        mock_cb.return_value = mock_cb_instance
+
+        response = client.get("/health")
+
+    assert response.status_code == 503
     assert response.json()["status"] == "degraded"
 
-@patch('app.api.routes.get_rag_pipeline')
+@patch('app.api.routes.chat.get_rag_pipeline')
 def test_ask_question_success(mock_rag):
     mock_pipeline = MagicMock()
     mock_result = MagicMock()
@@ -83,7 +125,7 @@ def test_ask_question_success(mock_rag):
     assert "This is a test answer" in data["answer"]
     assert "test.pdf" in data["answer"]
 
-@patch('app.api.routes.get_rag_pipeline')
+@patch('app.api.routes.chat.get_rag_pipeline')
 def test_ask_question_failure(mock_rag):
     mock_pipeline = MagicMock()
     mock_result = MagicMock()
@@ -103,7 +145,7 @@ def test_ask_question_failure(mock_rag):
     assert data["success"] is False
     assert "Maaf, saya tidak bisa menemukan jawaban" in data["answer"]
 
-@patch('app.api.routes.get_engagement_analyzer')
+@patch('app.api.routes.analytics.get_engagement_analyzer')
 def test_analyze_engagement(mock_analyzer):
     mock_analyzer_instance = MagicMock()
     mock_analysis = MagicMock()
@@ -123,7 +165,7 @@ def test_analyze_engagement(mock_analyzer):
     assert data["lexical_variety"] == 0.8
     assert data["engagement_type"] == "cognitive"
 
-@patch('app.api.routes.get_orchestrator')
+@patch('app.api.routes.analytics.get_orchestrator')
 def test_get_group_dashboard(mock_orchestrator):
     mock_orch_instance = MagicMock()
     mock_orch_instance.get_group_dashboard_data = AsyncMock(return_value={"group": "data"})
@@ -133,7 +175,7 @@ def test_get_group_dashboard(mock_orchestrator):
     assert response.status_code == 200
     assert response.json() == {"group": "data"}
 
-@patch('app.api.routes.get_orchestrator')
+@patch('app.api.routes.analytics.get_orchestrator')
 def test_get_individual_dashboard(mock_orchestrator):
     mock_orch_instance = MagicMock()
     mock_orch_instance.get_individual_dashboard_data = AsyncMock(return_value={"individual": "data"})

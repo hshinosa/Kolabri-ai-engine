@@ -142,9 +142,12 @@ Pertanyaan Mahasiswa: {query}
 
 INSTRUKSI MENJAWAB:
 1. Identifikasi apakah pertanyaan bisa dijawab dari konteks di atas.
-2. Jika YA: jawab dengan mengutip/merujuk bagian konteks yang relevan.
+2. Jika YA: jawab dengan menggunakan kata-kata dan frasa yang SAMA dengan yang ada di konteks dokumen. Kutip langsung jika memungkinkan.
 3. Jika TIDAK: katakan bahwa informasi tidak tersedia dalam materi.
-4. Akhiri dengan pertanyaan Socratic untuk pendalaman.
+4. Sebutkan nama sumber dokumen dalam jawaban (misal: "Berdasarkan materi X...").
+5. Akhiri dengan pertanyaan Socratic untuk pendalaman.
+
+PENTING: Gunakan terminologi yang PERSIS sama dengan konteks dokumen. Jangan parafrase berlebihan.
 
 Jawaban:"""
 
