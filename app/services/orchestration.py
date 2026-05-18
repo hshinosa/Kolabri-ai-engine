@@ -233,6 +233,12 @@ class Orchestrator:
                 "is_hot": True, "scaffolding_trigger": not res.is_valid, "score": res.score, "missingCriteria": res.missing_criteria
             }
         })
+        await self.mongo_logger.log_activity({
+            "CaseID": f"{chat_space_id}_session_{session_id}", "Activity": "Goal_Setting",
+            "Timestamp": datetime.now(), "Resource": f"Student_{user_id}", "Lifecycle": "complete",
+            "metadata": {"interactionType": "GOAL_SETTING", "phase": "Forethought"},
+            "content": goal_text, "userId": user_id,
+        })
         
         return {
             "is_valid": res.is_valid, "score": res.score, "feedback": res.feedback,
@@ -304,7 +310,8 @@ class Orchestrator:
         # Alignment (Gap 3)
         align_data = {}
         try:
-            case_id = f"{group_id}_session_1"
+            session_id = await self._get_latest_session_id(group_id)
+            case_id = f"{group_id}_session_{session_id}"
             analysis = await self.plan_vs_reality.analyze_session(case_id)
             align_data = {
                 "score": analysis.comparison.get("alignment_score", 0),
