@@ -345,3 +345,7 @@ class PersonalChatResponse(BaseModel):
     tokens_used: int = 0
     error: Optional[str] = None
 
+
+class TrackActivityRequest(BaseModel):
+    group_id: str
+

@@ -83,10 +83,12 @@ from app.api.schemas import (
     GuardrailCheckResponse,
     PersonalChatRequest,
     PersonalChatResponse,
+    TrackActivityRequest,
 )
 from app.core.guardrails import get_guardrails, GuardrailAction
 from app.services.export_service import get_export_service
 from app.services.efficiency_guard import get_efficiency_guard
+from app.services.logic_listener import get_logic_listener
 
 # [PRIORITY 1] Batch routes untuk high throughput
 from app.api.batch_routes import router as batch_router
@@ -1695,3 +1697,14 @@ async def delete_document(
     except Exception as e:
         logger.error("document_delete_failed", error=str(e), document_id=document_id)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/track-activity",
+    tags=["Analytics"],
+    summary="Track group activity for Logic Listener silence detection",
+)
+async def track_activity(request: TrackActivityRequest):
+    logic_listener = get_logic_listener()
+    await logic_listener.update_last_message_time(request.group_id)
+    return {"success": True}
