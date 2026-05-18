@@ -39,7 +39,7 @@ async def get_cache_statistics():
         return JSONResponse(content={"enabled": True, **stats})
 
     except Exception:
-        logger.exception("cache_statistics_api_failed", error=str(e))
+        logger.exception("cache_statistics_api_failed")
         raise
 
 
@@ -91,7 +91,7 @@ async def get_efficiency_statistics():
         return JSONResponse(content={"enabled": True, **stats})
 
     except Exception:
-        logger.exception("efficiency_statistics_api_failed", error=str(e))
+        logger.exception("efficiency_statistics_api_failed")
         raise
 
 
@@ -120,7 +120,7 @@ async def get_rate_limit_info(identifier: str):
         return JSONResponse(content={"enabled": True, **info})
 
     except Exception:
-        logger.exception("rate_limit_info_api_failed", error=str(e), identifier=identifier)
+        logger.exception("rate_limit_info_api_failed", identifier=identifier)
         raise
 
 
@@ -146,5 +146,5 @@ async def get_high_frequency_queries(
         return JSONResponse(content={"enabled": True, "queries": queries})
 
     except Exception:
-        logger.exception("high_frequency_queries_api_failed", error=str(e))
+        logger.exception("high_frequency_queries_api_failed")
         raise

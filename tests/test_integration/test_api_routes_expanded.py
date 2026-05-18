@@ -223,7 +223,8 @@ class TestAskEndpoint:
         data = resp.json()
         assert data["success"] is False
         assert "kesalahan" in data["answer"]
-        assert "LLM timeout" in data["error"]
+        assert "LLM timeout" not in data["error"]
+        assert data["error"] == "Internal error"
 
     def test_missing_query_returns_422(self, client):
         """Omitting required 'query' field triggers validation error."""
@@ -566,7 +567,8 @@ class TestEngagementEndpoint:
         assert data["lexical_variety"] == 0
         assert data["engagement_type"] == "unknown"
         assert data["word_count"] == 0
-        assert "tokenizer error" in data["error"]
+        assert "tokenizer error" not in data["error"]
+        assert data["error"] == "Internal error"
 
     def test_empty_text_returns_422(self, client):
         """Empty text violates min_length=1 validation."""

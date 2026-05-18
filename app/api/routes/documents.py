@@ -82,12 +82,11 @@ async def _process_ingest_background(
                 filename=original_filename,
                 error=result.error,
             )
-    except Exception as e:
-        logger.error(
+    except Exception:
+        logger.exception(
             "document_ingest_failed",
             file_id=file_id,
             filename=original_filename,
-            error=str(e),
         )
     finally:
         try:
@@ -141,12 +140,11 @@ async def _process_batch_file_background(
                 filename=original_filename,
                 error=result.error,
             )
-    except Exception as e:
-        logger.error(
+    except Exception:
+        logger.exception(
             "batch_file_ingest_failed",
             document_id=document_id,
             filename=original_filename,
-            error=str(e),
         )
     finally:
         try:
@@ -208,7 +206,7 @@ async def ingest_document(
                 tmp_file.write(chunk)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -287,8 +285,8 @@ async def ingest_batch(
                     "index": i,
                 }
             )
-        except Exception as e:
-            logger.error("batch_file_save_failed", filename=file.filename, error=str(e))
+        except Exception:
+            logger.exception("batch_file_save_failed", filename=file.filename)
 
     if not saved_files:
         raise HTTPException(status_code=400, detail="No valid files provided")

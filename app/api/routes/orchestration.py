@@ -46,12 +46,12 @@ async def orchestrated_chat(request: OrchestrationRequest):
             error=result.error,
         )
 
-    except Exception as e:
-        logger.error("orchestrated_chat_failed", error=str(e))
+    except Exception:
+        logger.exception("orchestrated_chat_failed")
         return OrchestrationResponse(
             success=False,
             bot_response="Maaf, terjadi kesalahan sistem.",
             action_taken="ERROR",
             should_notify_teacher=False,
-            error=str(e),
+            error="Internal error",
         )

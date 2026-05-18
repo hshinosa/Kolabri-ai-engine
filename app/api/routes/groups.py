@@ -37,8 +37,8 @@ async def check_group_status(
 
         return JSONResponse(content=result)
 
-    except Exception as e:
-        logger.error("group_status_check_api_failed", error=str(e), group_id=group_id)
+    except Exception:
+        logger.exception("group_status_check_api_failed", group_id=group_id)
         raise
 
 
@@ -59,13 +59,10 @@ async def track_participation(group_id: str, user_id: str = Form(...)):
 
         return JSONResponse(content=result)
 
-    except Exception as e:
-        logger.error(
-            "participation_tracking_api_failed",
-            error=str(e),
+    except Exception:
+        logger.exception("participation_tracking_api_failed",
             group_id=group_id,
-            user_id=user_id,
-        )
+            user_id=user_id)
         raise
 
 
@@ -84,10 +81,8 @@ async def update_last_message_time(group_id: str):
 
         return JSONResponse(content=result)
 
-    except Exception as e:
-        logger.error(
-            "last_message_time_update_api_failed", error=str(e), group_id=group_id
-        )
+    except Exception:
+        logger.exception("last_message_time_update_api_failed", group_id=group_id)
         raise
 
 
@@ -106,8 +101,6 @@ async def set_group_topic(group_id: str, topic: str = Form(...)):
 
         return JSONResponse(content=result)
 
-    except Exception as e:
-        logger.error(
-            "group_topic_set_api_failed", error=str(e), group_id=group_id, topic=topic
-        )
+    except Exception:
+        logger.exception("group_topic_set_api_failed", group_id=group_id, topic=topic)
         raise

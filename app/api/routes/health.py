@@ -37,8 +37,8 @@ async def health_check():
         await vector_store._ensure_collection("health_check")
         services["vector_store"] = True
         dependencies["vector_store"] = "healthy"
-    except Exception as e:
-        logger.warning("health_check_vector_store_failed", error=str(e))
+    except Exception:
+        logger.exception("health_check_vector_store_failed")
 
     try:
         from app.services.llm import get_llm_service
@@ -46,8 +46,8 @@ async def health_check():
         llm = get_llm_service()
         services["llm"] = llm.model is not None
         dependencies["llm"] = "healthy" if services["llm"] else "down"
-    except Exception as e:
-        logger.warning("health_check_llm_failed", error=str(e))
+    except Exception:
+        logger.exception("health_check_llm_failed")
 
     try:
         from app.services.mongodb_logger import get_mongo_logger
@@ -57,8 +57,8 @@ async def health_check():
             dependencies["mongo"] = "healthy"
         elif await mongo.ping():
             dependencies["mongo"] = "healthy"
-    except Exception as e:
-        logger.warning("health_check_mongo_failed", error=str(e))
+    except Exception:
+        logger.exception("health_check_mongo_failed")
 
     try:
         from app.core.redis_cache import get_redis_cache
@@ -66,8 +66,8 @@ async def health_check():
         redis_cache = await get_redis_cache()
         if await redis_cache.ping():
             dependencies["redis"] = "healthy"
-    except Exception as e:
-        logger.warning("health_check_redis_failed", error=str(e))
+    except Exception:
+        logger.exception("health_check_redis_failed")
 
     circuit_breakers: Dict[str, str] = {}
     try:
@@ -75,8 +75,8 @@ async def health_check():
 
         breaker = get_llm_circuit_breaker()
         circuit_breakers["llm"] = breaker.state.value
-    except Exception as e:
-        logger.warning("health_check_breaker_failed", error=str(e))
+    except Exception:
+        logger.exception("health_check_breaker_failed")
 
     is_degraded = (
         any(state != "healthy" for state in dependencies.values())

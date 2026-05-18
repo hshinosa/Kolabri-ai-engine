@@ -77,12 +77,12 @@ async def ask_question(request: AskRequest):
                 error=result.error,
             )
 
-    except Exception as e:
-        logger.error("ask_question_failed", query=request.query[:100], error=str(e))
+    except Exception:
+        logger.exception("ask_question_failed", query=request.query[:100])
         return AskResponse(
             answer="Maaf, terjadi kesalahan saat memproses pertanyaan. Silakan coba lagi.",
             success=False,
-            error=str(e),
+            error="Internal error",
         )
 
 
@@ -116,12 +116,12 @@ async def personal_chat(request: PersonalChatRequest):
 
         return PersonalChatResponse(reply=reply, success=True)
 
-    except Exception as e:
-        logger.error("personal_chat_failed", error=str(e))
+    except Exception:
+        logger.exception("personal_chat_failed")
         return PersonalChatResponse(
             reply="Maaf, terjadi kesalahan. Silakan coba lagi.",
             success=False,
-            error=str(e),
+            error="Internal error",
         )
 
 
@@ -156,9 +156,9 @@ async def personal_chat_stream(request: PersonalChatRequest):
                 if delta and delta.content:
                     yield f"data: {_json.dumps({'content': delta.content})}\n\n"
             yield "data: [DONE]\n\n"
-        except Exception as e:
-            logger.error("personal_chat_stream_failed", error=str(e))
-            yield f"data: {_json.dumps({'error': str(e)})}\n\n"
+        except Exception:
+            logger.exception("personal_chat_stream_failed")
+            yield f"data: {_json.dumps({'error': 'Internal error'})}\n\n"
 
     return StreamingResponse(
         event_generator(),

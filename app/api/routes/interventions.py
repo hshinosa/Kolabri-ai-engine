@@ -58,12 +58,12 @@ async def analyze_intervention(request: InterventionRequest):
             error=result.error,
         )
 
-    except Exception as e:
-        logger.error("intervention_analysis_failed", error=str(e))
+    except Exception:
+        logger.exception("intervention_analysis_failed")
         return InterventionResponse(
             success=False,
             needs_intervention=False,
-            error=str(e),
+            error="Internal error",
         )
 
 
@@ -100,13 +100,13 @@ async def generate_summary(request: SummaryRequest):
             error=result.error,
         )
 
-    except Exception as e:
-        logger.error("summary_generation_failed", error=str(e))
+    except Exception:
+        logger.exception("summary_generation_failed")
         return SummaryResponse(
             success=False,
             summary="",
             message_count=len(request.messages),
-            error=str(e),
+            error="Internal error",
         )
 
 
@@ -134,11 +134,11 @@ async def generate_prompt(request: PromptRequest):
             error=result.error,
         )
 
-    except Exception as e:
-        logger.error("prompt_generation_failed", error=str(e))
+    except Exception:
+        logger.exception("prompt_generation_failed")
         return PromptResponse(
             success=False,
             prompt="",
             topic=request.topic,
-            error=str(e),
+            error="Internal error",
         )

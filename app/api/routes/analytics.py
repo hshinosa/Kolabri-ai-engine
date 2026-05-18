@@ -54,11 +54,11 @@ async def analyze_engagement(request: EngagementAnalysisRequest):
             unique_words=len(set(request.text.lower().split())),
             confidence=1.0,
         )
-    except Exception as e:
-        logger.error("engagement_analysis_failed", error=str(e))
+    except Exception:
+        logger.exception("engagement_analysis_failed")
         return EngagementAnalysisResponse(
             success=False,
-            error=str(e),
+            error="Internal error",
             lexical_variety=0,
             engagement_type="unknown",
             is_higher_order=False,
@@ -128,8 +128,8 @@ async def export_group_activity_csv(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
-    except Exception as e:
-        logger.error("csv_export_failed", group_id=group_id, error=str(e))
+    except Exception:
+        logger.exception("csv_export_failed", group_id=group_id)
         raise
 
 
@@ -164,8 +164,8 @@ async def export_chat_space_activity_csv(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
-    except Exception as e:
-        logger.error("csv_export_failed", chat_space_id=chat_space_id, error=str(e))
+    except Exception:
+        logger.exception("csv_export_failed", chat_space_id=chat_space_id)
         raise
 
 
@@ -195,8 +195,8 @@ async def export_process_mining_csv(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
-    except Exception as e:
-        logger.error("process_mining_export_failed", case_id=case_id, error=str(e))
+    except Exception:
+        logger.exception("process_mining_export_failed", case_id=case_id)
         raise
 
 
@@ -224,12 +224,12 @@ async def get_group_analytics_alias(group_id: str):
             hot_percentage=data.get("hot_percentage"),
         )
 
-    except Exception as e:
-        logger.error("group_analytics_alias_failed", error=str(e), group_id=group_id)
+    except Exception:
+        logger.exception("group_analytics_alias_failed", group_id=group_id)
         return GroupAnalyticsResponse(
             success=False,
             group_id=group_id,
-            error=str(e),
+            error="Internal error",
         )
 
 
@@ -281,14 +281,14 @@ async def export_process_mining_general(
             }
         )
 
-    except Exception as e:
-        logger.error("process_mining_general_export_failed", error=str(e))
+    except Exception:
+        logger.exception("process_mining_general_export_failed")
         return JSONResponse(
             content={
                 "success": False,
                 "file_url": "",
                 "total_events": 0,
                 "unique_cases": 0,
-                "error": str(e),
+                "error": "Internal error",
             }
         )
