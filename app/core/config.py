@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # ✅ SEC: No hardcoded secrets - must be loaded from environment
     OPENAI_API_KEY: str = ""  # Validated in production via model_validator
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"  # ✅ SEC: HTTPS default
-    OPENAI_MODEL: str = "gpt-5.2"
+    OPENAI_MODEL: str = "deepseek/deepseek-chat"
     OPENAI_EMBEDDING_MODEL: str = "embedding-2"
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: int = 2048

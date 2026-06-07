@@ -8,7 +8,12 @@ import re
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.api.schemas import AskRequest, AskResponse, PersonalChatRequest, PersonalChatResponse
+from app.api.schemas import (
+    AskRequest,
+    AskResponse,
+    PersonalChatRequest,
+    PersonalChatResponse,
+)
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.prompt_styles import PERSONAL_CHAT_STYLE
@@ -22,8 +27,7 @@ router = APIRouter()
 PERSONAL_CHAT_SYSTEM_PROMPT = (
     "Kamu adalah Kolabri AI, asisten belajar cerdas untuk mahasiswa. "
     "Bantu mahasiswa memahami materi, menjawab pertanyaan akademik maupun pertanyaan personal ringan dengan penjelasan yang jelas, akurat, suportif, dan edukatif. "
-    "Jawab dalam Bahasa Indonesia kecuali diminta sebaliknya. "
-    + PERSONAL_CHAT_STYLE
+    "Jawab dalam Bahasa Indonesia kecuali diminta sebaliknya. " + PERSONAL_CHAT_STYLE
 )
 
 COURSE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -53,7 +57,9 @@ async def ask_question(request: AskRequest):
         collection_name = f"course_{request.course_id}"
 
         result = await rag_pipeline.query(
-            query=request.query, collection_name=collection_name, n_results=5
+            query=request.query,
+            collection_name=collection_name,
+            n_results=settings.TOP_K_RESULTS,
         )
 
         if result.success:
