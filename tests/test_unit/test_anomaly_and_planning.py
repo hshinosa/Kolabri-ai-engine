@@ -752,7 +752,7 @@ async def test_session_anomalies_exception(detector, mongo_mock):
     result = await detector.detect_session_anomalies("cs1", group_id="g1")
     assert result.has_anomalies is False
     assert result.anomaly_type == "error"
-    assert "DB down" in result.description
+    assert result.description == "Failed to detect anomalies: internal error"
     assert result.affected_groups == ["g1"]
 
 
@@ -903,7 +903,7 @@ async def test_course_anomalies_exception(detector, mongo_mock):
     result = await detector.detect_course_anomalies("course1")
     assert result.has_anomalies is False
     assert result.anomaly_type == "error"
-    assert "DB error" in result.description
+    assert result.description == "Failed to detect anomalies: internal error"
 
 
 # ##############################################################################
@@ -1780,6 +1780,6 @@ async def test_analyze_session_exception(analyzer, mongo_mock):
     assert result.case_id == "cs1"
     assert result.goal_id == "g1"
     assert "Analysis failed" in result.insights[0]
-    assert "Boom" in result.insights[0]
+    assert "internal error" in result.insights[0]
     assert result.plan == {}
     assert result.reality == {}

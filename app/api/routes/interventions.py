@@ -41,20 +41,25 @@ async def analyze_intervention(request: InterventionRequest):
             for msg in request.messages
         ]
 
-        result = await intervention_service.analyze_conversation(
+        result = await intervention_service.analyze_and_intervene(
             messages=messages_dicts,
-            group_id=request.group_id,
             topic=request.topic,
+            chat_room_id=request.chat_room_id,
+        )
+
+        intervention_type_value = (
+            result.intervention_type.value
+            if result.intervention_type is not None
+            else ""
         )
 
         return InterventionResponse(
             success=result.success,
-            needs_intervention=result.needs_intervention,
-            intervention_type=result.intervention_type.value
-            if result.intervention_type
-            else None,
-            message=result.message,
-            confidence=result.confidence,
+            should_intervene=result.should_intervene,
+            message=result.message or "",
+            intervention_type=intervention_type_value,
+            confidence=result.confidence or 0.0,
+            reason=result.reason or "",
             error=result.error,
         )
 
@@ -62,7 +67,11 @@ async def analyze_intervention(request: InterventionRequest):
         logger.exception("intervention_analysis_failed")
         return InterventionResponse(
             success=False,
-            needs_intervention=False,
+            should_intervene=False,
+            message="",
+            intervention_type="",
+            confidence=0.0,
+            reason="Internal error",
             error="Internal error",
         )
 

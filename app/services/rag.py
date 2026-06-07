@@ -25,7 +25,12 @@ logger = get_logger(__name__)
 
 @dataclass
 class RAGResult:
-    """Result from RAG pipeline query."""
+    """Result from RAG pipeline query.
+
+    Note: ``error`` field contains user-safe messages only. Internal exception
+    details are logged via ``logger.exception(...)`` and never exposed in this
+    field. Route handlers may safely propagate ``error`` to clients.
+    """
     answer: str
     sources: List[Dict[str, Any]]
     query: str
@@ -322,8 +327,8 @@ class RAGPipeline:
                             )
                             if reranked_results:
                                 search_results = reranked_results
-                        except Exception as rerank_error:
-                            logger.warning("rag_rerank_fallback", error=str(rerank_error))
+                        except Exception:
+                            logger.exception("rag_rerank_fallback")
 
                     search_results = search_results[: (n_results or self.quality_controls.top_k_results)]
 
@@ -419,22 +424,21 @@ class RAGPipeline:
                     processing_time_ms=processing_time
                 )
                 
-            except Exception as e:
+            except Exception:
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                
-                logger.error(
+
+                logger.exception(
                     "rag_query_failed",
-                    error=str(e),
                     query=query[:100]
                 )
-                
+
                 return RAGResult(
                     answer="",
                     sources=[],
                     query=query,
                     tokens_used=0,
                     success=False,
-                    error=str(e),
+                    error="Internal error",
                     processing_time_ms=processing_time
                 )
         
@@ -526,10 +530,9 @@ class RAGPipeline:
             
             return similar
             
-        except Exception as e:
-            logger.warning(
-                "similar_questions_failed",
-                error=str(e)
+        except Exception:
+            logger.exception(
+                "similar_questions_failed"
             )
             return []
     

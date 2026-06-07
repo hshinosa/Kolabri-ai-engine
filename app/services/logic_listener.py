@@ -234,12 +234,12 @@ class LogicListener:
                 metadata={"similarity": similarity}
             )
             
-        except Exception as e:
-            logger.error("relevance_check_failed", group_id=group_id, error=str(e))
+        except Exception:
+            logger.exception("relevance_check_failed", group_id=group_id)
             return InterventionTrigger(
                 should_intervene=False,
                 intervention_type=None,
-                reason=f"Error checking relevance: {str(e)}",
+                reason="Error checking relevance: internal error",
                 suggested_message="",
                 metadata={}
             )
@@ -506,8 +506,8 @@ class LogicListener:
                 type=intervention_type.value,
                 reason=reason
             )
-        except Exception as e:
-            logger.error("intervention_logging_failed", group_id=group_id, error=str(e))
+        except Exception:
+            logger.exception("intervention_logging_failed", group_id=group_id)
 
 
 # Singleton instance

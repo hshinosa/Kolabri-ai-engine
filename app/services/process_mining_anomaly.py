@@ -209,18 +209,17 @@ class ProcessMiningAnomalyDetector:
                 timestamp=datetime.now()
             )
             
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "session_anomaly_detection_failed",
-                error=str(e),
                 chat_space_id=chat_space_id
             )
-            
+
             return AnomalyDetectionResult(
                 has_anomalies=False,
                 anomaly_type="error",
                 severity="low",
-                description=f"Failed to detect anomalies: {str(e)}",
+                description="Failed to detect anomalies: internal error",
                 affected_users=[],
                 affected_groups=[group_id] if group_id else [],
                 metrics={},
@@ -339,18 +338,17 @@ class ProcessMiningAnomalyDetector:
                 timestamp=datetime.now()
             )
             
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "course_anomaly_detection_failed",
-                error=str(e),
                 course_id=course_id
             )
-            
+
             return AnomalyDetectionResult(
                 has_anomalies=False,
                 anomaly_type="error",
                 severity="low",
-                description=f"Failed to detect anomalies: {str(e)}",
+                description="Failed to detect anomalies: internal error",
                 affected_users=[],
                 affected_groups=[],
                 metrics={},

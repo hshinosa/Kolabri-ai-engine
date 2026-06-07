@@ -443,9 +443,9 @@ class DocumentProcessor:
 
             return result
 
-        except Exception as e:
+        except Exception:
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
-            logger.error("document_processing_failed", filename=filename, error=str(e))
+            logger.exception("document_processing_failed", filename=filename)
 
             return ProcessedDocument(
                 filename=filename,
@@ -456,7 +456,7 @@ class DocumentProcessor:
                 total_characters=0,
                 processing_time_ms=processing_time,
                 success=False,
-                error=str(e),
+                error="Internal error",
             )
 
     async def process_zip(
@@ -606,8 +606,8 @@ class DocumentProcessor:
             if temp_dir and os.path.exists(temp_dir):
                 try:
                     shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.warning("temp_cleanup_failed", error=str(e))
+                except Exception:
+                    logger.exception("temp_cleanup_failed")
             gc.collect()
 
     async def _process_file_from_path(
@@ -635,8 +635,8 @@ class DocumentProcessor:
             )
             return result
 
-        except Exception as e:
-            logger.error("file_from_path_failed", path=file_path, error=str(e))
+        except Exception:
+            logger.exception("file_from_path_failed", path=file_path)
             return ProcessedDocument(
                 filename=filename,
                 file_type="unknown",
@@ -646,7 +646,7 @@ class DocumentProcessor:
                 total_characters=0,
                 processing_time_ms=0,
                 success=False,
-                error=str(e),
+                error="Internal error",
             )
         finally:
             gc.collect()

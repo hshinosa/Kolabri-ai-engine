@@ -112,8 +112,8 @@ class VectorStoreService:
 
         try:
             await self._ensure_collection(target_collection)
-        except Exception as e:
-            logger.warning("collection_not_found", collection=target_collection, error=str(e))
+        except Exception:
+            logger.exception("collection_not_found", collection=target_collection)
             return []
 
         query_embedding = await self._embedding_service.embed_query(query)
@@ -206,8 +206,8 @@ class VectorStoreService:
                 )
 
             logger.info("documents_deleted", collection=target_collection, ids_count=len(ids) if ids else 0)
-        except Exception as e:
-            logger.error("delete_failed", collection=target_collection, error=str(e))
+        except Exception:
+            logger.exception("delete_failed", collection=target_collection)
             raise
 
     async def delete_collection(self, collection_name: str) -> bool:
@@ -218,8 +218,8 @@ class VectorStoreService:
             self._client.delete_collection(collection_name=collection_name)
             logger.info("collection_deleted", collection=collection_name)
             return True
-        except Exception as e:
-            logger.warning("collection_delete_failed", collection=collection_name, error=str(e))
+        except Exception:
+            logger.exception("collection_delete_failed", collection=collection_name)
             return False
 
     async def list_collections(self) -> List[Dict[str, Any]]:

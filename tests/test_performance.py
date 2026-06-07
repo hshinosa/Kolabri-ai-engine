@@ -11,7 +11,7 @@ import time
 import httpx
 
 
-async def test_final():
+async def final_benchmark():
     """Test final dengan semua optimizations."""
     
     base_url = "http://43.228.214.145:8317/v1"

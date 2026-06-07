@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from app.core.config import settings
+
 from app.api.routes.health import router as _health_router
 from app.api.routes.track_activity import router as _track_activity_router
 from app.api.routes.monitoring import router as _monitoring_router
@@ -34,6 +36,7 @@ router.include_router(_interventions_router)
 
 __all__ = [
     "router",
+    "settings",
     "_process_ingest_background",
     "_process_batch_file_background",
     "ingest_document",

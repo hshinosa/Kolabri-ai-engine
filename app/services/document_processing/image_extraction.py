@@ -46,8 +46,8 @@ def initialize_ocr_engine() -> Optional[PaddleOCR]:
         logging.getLogger("ppocr").setLevel(logging.ERROR)
         logger.info("PaddleOCR initialized", lang=lang)
         return engine
-    except Exception as exc:
-        logger.error("Failed to initialize PaddleOCR", error=str(exc))
+    except Exception:
+        logger.exception("Failed to initialize PaddleOCR")
         return None
 
 
@@ -57,8 +57,8 @@ def run_paddle_ocr(image: Image.Image, ocr_engine: Optional[PaddleOCR]) -> str:
     try:
         np_image = np.array(image)
         result = ocr_engine.ocr(np_image, cls=True)
-    except Exception as exc:
-        logger.debug("ocr_failed", error=str(exc))
+    except Exception:
+        logger.exception("ocr_failed")
         return ""
     finally:
         try:
@@ -110,8 +110,8 @@ async def run_ocr_optimized(
         )
 
         return text.strip()
-    except Exception as e:
-        logger.debug("ocr_failed", error=str(e))
+    except Exception:
+        logger.exception("ocr_failed")
         return ""
 
 
@@ -149,8 +149,8 @@ async def run_page_ocr(
             image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             pix = None
             return image
-        except Exception as exc:
-            logger.debug("page_render_failed", error=str(exc))
+        except Exception:
+            logger.exception("page_render_failed")
             return None
 
     loop = asyncio.get_running_loop()
@@ -234,8 +234,8 @@ async def generate_image_caption(
             prepared_image.close()
 
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.warning("vision_api_failed", error=str(e))
+    except Exception:
+        logger.exception("vision_api_failed")
         return ""
 
 
@@ -291,8 +291,8 @@ async def process_image(
             processing_time_ms=0,
             success=True,
         )
-    except Exception as e:
-        logger.error("image_processing_failed", filename=filename, error=str(e))
+    except Exception:
+        logger.exception("image_processing_failed", filename=filename)
         raise
     finally:
         if img is not None:

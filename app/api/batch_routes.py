@@ -273,18 +273,17 @@ async def _process_single_ask(request: BatchAskRequest) -> BatchAskResponse:
             from_cache=False
         )
         
-    except Exception as e:
+    except Exception:
         processing_time = (time.time() - start_time) * 1000
-        logger.error(
+        logger.exception(
             "batch_request_failed",
             request_id=request.request_id,
-            error=str(e)
         )
         return BatchAskResponse(
             request_id=request.request_id,
             success=False,
             answer="",
-            error=str(e),
+            error="Internal error",
             processing_time_ms=round(processing_time, 2),
             from_cache=False
         )

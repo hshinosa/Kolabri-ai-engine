@@ -101,9 +101,9 @@ class CircuitBreaker:
             result = await func(*args, **kwargs)
             await self._record_success()
             return result
-        except Exception as e:
+        except Exception:
             await self._record_failure()
-            raise e
+            raise
     
     def protect(self, func: Callable) -> Callable:
         """Decorator untuk protect function dengan circuit breaker."""

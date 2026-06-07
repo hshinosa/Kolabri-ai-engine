@@ -299,7 +299,7 @@ class TestRAGPipeline:
         mock_vector_store.search = AsyncMock(side_effect=Exception("Test error"))
         result = await rag_pipeline.query("test query yang panjang")
         assert result.success is False
-        assert result.error == "Test error"
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_query_with_efficiency_guard(self, mock_vector_store, mock_llm, mock_guardrails):

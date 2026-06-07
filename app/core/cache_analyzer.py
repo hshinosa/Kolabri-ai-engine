@@ -130,9 +130,9 @@ class CacheAnalyzer:
                 else:
                     failed += 1
                     
-            except Exception as e:
+            except Exception:
                 failed += 1
-                logger.error("cache_prewarm_failed", query=query[:30], error=str(e))
+                logger.exception("cache_prewarm_failed", query=query[:30])
             
             # Progress log setiap 10 queries
             if i % 10 == 0:

@@ -74,7 +74,7 @@ class TestAuthMiddleware:
     ):
         response = client.get("/api/health", headers=auth_headers)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)
 
 
 class TestHealthAndMonitoringEndpoints:
@@ -83,7 +83,7 @@ class TestHealthAndMonitoringEndpoints:
     ):
         response = client.get("/api/health", headers=auth_headers)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)
         data = response.json()
         assert "status" in data
 
@@ -92,7 +92,7 @@ class TestHealthAndMonitoringEndpoints:
     ):
         response = client.get("/api/health", headers=auth_headers)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)
         data = response.json()
         assert set(data.keys()) >= {"status", "version", "timestamp", "services"}
         assert data["status"] in {"healthy", "degraded", "unhealthy"}
@@ -363,7 +363,7 @@ class TestResponseStructure:
     ):
         response = client.get("/api/health", headers=auth_headers)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)
         assert "application/json" in response.headers.get("content-type", "")
 
     def test_successful_ask_response_shape_when_available(

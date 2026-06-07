@@ -428,7 +428,7 @@ class TestProcessFile:
             collection_name="c",
         )
         assert r.success is False
-        assert "boom" in r.error
+        assert r.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_process_pdf_routing(self, proc):
@@ -2685,7 +2685,7 @@ class TestEdgeCaseBranches:
             )
             # The ValueError is caught by the outer try/except and returned as error
             assert r.success is False
-            assert "Handler not implemented" in r.error
+            assert r.error == "Internal error"
         finally:
             proc.SUPPORTED_EXTENSIONS = original
 

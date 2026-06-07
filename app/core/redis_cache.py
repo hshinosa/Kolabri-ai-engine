@@ -82,8 +82,8 @@ class RedisCache:
                            host=REDIS_CONFIG['host'], 
                            port=REDIS_CONFIG['port'])
                 
-            except Exception as e:
-                logger.error("redis_connection_failed", error=str(e))
+            except Exception:
+                logger.exception("redis_connection_failed")
                 self._redis = None
                 raise
     
@@ -101,8 +101,8 @@ class RedisCache:
                 await self.initialize()
             await self._redis.ping()
             return True
-        except Exception as e:
-            logger.warning("redis_ping_failed", error=str(e))
+        except Exception:
+            logger.exception("redis_ping_failed")
             return False
     
     async def get(self, key: str) -> Optional[Any]:
@@ -115,8 +115,8 @@ class RedisCache:
             if value:
                 return json.loads(value)
             return None
-        except Exception as e:
-            logger.warning("redis_get_error", key=key, error=str(e))
+        except Exception:
+            logger.exception("redis_get_error", key=key)
             return None
     
     async def set(
@@ -140,8 +140,8 @@ class RedisCache:
             else:
                 await self._redis.setex(key, ttl, serialized)
                 return True
-        except Exception as e:
-            logger.warning("redis_set_error", key=key, error=str(e))
+        except Exception:
+            logger.exception("redis_set_error", key=key)
             return False
     
     async def delete(self, key: str) -> bool:
@@ -152,8 +152,8 @@ class RedisCache:
         try:
             await self._redis.delete(key)
             return True
-        except Exception as e:
-            logger.warning("redis_delete_error", key=key, error=str(e))
+        except Exception:
+            logger.exception("redis_delete_error", key=key)
             return False
     
     async def mget(self, keys: List[str]) -> List[Optional[Any]]:
@@ -164,8 +164,8 @@ class RedisCache:
         try:
             values = await self._redis.mget(keys)
             return [json.loads(v) if v else None for v in values]
-        except Exception as e:
-            logger.warning("redis_mget_error", error=str(e))
+        except Exception:
+            logger.exception("redis_mget_error")
             return [None] * len(keys)
     
     async def mset(self, mapping: Dict[str, Any], ttl: int = 3600) -> bool:
@@ -180,8 +180,8 @@ class RedisCache:
                 pipe.setex(key, ttl, serialized)
             await pipe.execute()
             return True
-        except Exception as e:
-            logger.warning("redis_mset_error", error=str(e))
+        except Exception:
+            logger.exception("redis_mset_error")
             return False
     
     async def get_or_set(
@@ -235,8 +235,8 @@ class RedisCache:
                 # Retry get_or_set (with limit to prevent infinite loop)
                 return await self.get_or_set(key, getter_func, ttl, lock_timeout)
                 
-        except Exception as e:
-            logger.error("redis_get_or_set_error", key=key, error=str(e))
+        except Exception:
+            logger.exception("redis_get_or_set_error", key=key)
             # Fallback: compute without caching
             return await getter_func()
     
@@ -265,9 +265,9 @@ class RedisCache:
                 "evicted_keys": info.get("evicted_keys", 0),
                 "expired_keys": info.get("expired_keys", 0),
             }
-        except Exception as e:
-            logger.error("redis_stats_error", error=str(e))
-            return {"error": str(e)}
+        except Exception:
+            logger.exception("redis_stats_error")
+            return {"error": "Internal error"}
     
     async def clear_pattern(self, pattern: str) -> int:
         """Clear all keys matching pattern."""
@@ -283,8 +283,8 @@ class RedisCache:
                 await self._redis.delete(*keys)
             
             return len(keys)
-        except Exception as e:
-            logger.error("redis_clear_pattern_error", pattern=pattern, error=str(e))
+        except Exception:
+            logger.exception("redis_clear_pattern_error", pattern=pattern)
             return 0
 
 

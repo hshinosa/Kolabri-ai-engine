@@ -444,12 +444,12 @@ class GoalValidator:
                     "raw_response": response.content
                 }
                 
-        except Exception as e:
-            logger.error("goal_refinement_failed", error=str(e))
-            
+        except Exception:
+            logger.exception("goal_refinement_failed")
+
             return {
                 "success": False,
-                "error": str(e)
+                "error": "Internal error"
             }
 
     def generate_socratic_hint(self, missing_criteria: List[str]) -> str:

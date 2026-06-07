@@ -188,10 +188,9 @@ class ProcessMiningLogger:
                 course_id=course_id
             )
             
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "event_logging_failed",
-                error=str(e),
                 case_id=case_id,
                 activity=activity
             )
@@ -293,8 +292,8 @@ class ProcessMiningLogger:
                         entries.append(dict(row))
         except FileNotFoundError:
             logger.warning("log_file_not_found", file=str(self.log_file))
-        except Exception as e:
-            logger.error("log_read_failed", error=str(e))
+        except Exception:
+            logger.exception("log_read_failed")
         
         return entries
     
@@ -332,8 +331,8 @@ class ProcessMiningLogger:
             logger.info("prom_export_complete", file=output_path)
             return output_path
             
-        except Exception as e:
-            logger.error("prom_export_failed", error=str(e))
+        except Exception:
+            logger.exception("prom_export_failed")
             raise
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -361,8 +360,8 @@ class ProcessMiningLogger:
                         stats["hot_count"] += 1
         except FileNotFoundError:
             pass
-        except Exception as e:
-            logger.error("stats_calculation_failed", error=str(e))
+        except Exception:
+            logger.exception("stats_calculation_failed")
         
         # Convert sets to counts
         stats["unique_cases"] = len(stats["unique_cases"])

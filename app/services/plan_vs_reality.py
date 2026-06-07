@@ -131,13 +131,12 @@ class PlanVsRealityAnalyzer:
                 timestamp=datetime.now()
             )
             
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "plan_vs_reality_analysis_failed",
-                error=str(e),
                 chat_space_id=chat_space_id
             )
-            
+
             return PlanVsRealityResult(
                 case_id=chat_space_id,
                 goal_id=goal_id,
@@ -145,7 +144,7 @@ class PlanVsRealityAnalyzer:
                 reality={},
                 comparison={},
                 visualization_data={},
-                insights=[f"Analysis failed: {str(e)}"],
+                insights=["Analysis failed: internal error"],
                 recommendations=[],
                 timestamp=datetime.now()
             )
@@ -202,8 +201,8 @@ class PlanVsRealityAnalyzer:
                 "goal_count": len(goals)
             }
             
-        except Exception as e:
-            logger.error("plan_extraction_failed", error=str(e))
+        except Exception:
+            logger.exception("plan_extraction_failed")
             return {
                 "has_plan": False,
                 "goals": [],
@@ -256,8 +255,8 @@ class PlanVsRealityAnalyzer:
                 "engagement_metrics": engagement_metrics
             }
             
-        except Exception as e:
-            logger.error("reality_extraction_failed", error=str(e))
+        except Exception:
+            logger.exception("reality_extraction_failed")
             return {
                 "has_reality": False,
                 "topics": [],
@@ -329,8 +328,8 @@ class PlanVsRealityAnalyzer:
                 "overall_status": self._get_overall_status(alignment_score)
             }
             
-        except Exception as e:
-            logger.error("plan_reality_comparison_failed", error=str(e))
+        except Exception:
+            logger.exception("plan_reality_comparison_failed")
             return {}
     
     def _generate_visualization_data(
@@ -389,8 +388,8 @@ class PlanVsRealityAnalyzer:
                 "timeline": timeline_data
             }
             
-        except Exception as e:
-            logger.error("visualization_data_generation_failed", error=str(e))
+        except Exception:
+            logger.exception("visualization_data_generation_failed")
             return {}
     
     def _generate_insights(
@@ -457,8 +456,8 @@ class PlanVsRealityAnalyzer:
             else:
                 insights.append(f"Weak alignment between plan and reality ({alignment_score:.1f}%)")
             
-        except Exception as e:
-            logger.error("insights_generation_failed", error=str(e))
+        except Exception:
+            logger.exception("insights_generation_failed")
             insights.append("Unable to generate insights")
         
         return insights
@@ -514,8 +513,8 @@ class PlanVsRealityAnalyzer:
                 recommendations.append("Review and refine learning goals to better match actual activities")
                 recommendations.append("Consider adjusting time allocation to better match reality")
             
-        except Exception as e:
-            logger.error("recommendations_generation_failed", error=str(e))
+        except Exception:
+            logger.exception("recommendations_generation_failed")
             recommendations.append("Unable to generate recommendations")
         
         return recommendations
@@ -681,8 +680,8 @@ class PlanVsRealityAnalyzer:
             
             return round(alignment_score, 1)
             
-        except Exception as e:
-            logger.error("alignment_score_calculation_failed", error=str(e))
+        except Exception:
+            logger.exception("alignment_score_calculation_failed")
             return 0.0
     
     def _get_overall_status(self, alignment_score: float) -> str:

@@ -106,7 +106,7 @@ class TestChatInterventionService:
 
         result = await service.analyze_and_intervene(messages, "Machine Learning", "room")
         assert result.success is False
-        assert result.error == "boom"
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_check_triggers_inactive(self, service):
@@ -154,7 +154,7 @@ class TestChatInterventionService:
         messages = [{"content": f"msg {i}"} for i in range(10)]
         result = await service.generate_summary(messages, "room")
         assert result.success is False
-        assert result.error == "summary failed"
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_generate_discussion_prompt_success(self, service, mock_llm):
@@ -176,7 +176,7 @@ class TestChatInterventionService:
         mock_llm.generate.side_effect = RuntimeError("prompt failed")
         result = await service.generate_discussion_prompt("AI Ethics")
         assert result.success is False
-        assert result.error == "prompt failed"
+        assert result.error == "Internal error"
 
 
 class TestGetInterventionService:

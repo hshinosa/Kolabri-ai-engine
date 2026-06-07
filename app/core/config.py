@@ -29,9 +29,11 @@ class Settings(BaseSettings):
     # Server Configuration
     HOST: str = "0.0.0.0"
     PORT: int = 8001
-    ENV: Literal["development", "production", "testing"] = "production"  # ✅ SEC: Default to production
+    ENV: Literal["development", "production", "testing"] = (
+        "production"  # ✅ SEC: Default to production
+    )
     DEBUG: bool = False  # ✅ SEC: Default to False for security
-    
+
     # API Docs Configuration (KOL-141)
     DOCS_ENABLED: bool = False  # ✅ SEC: Disabled by default
     ENABLE_DOCS_IN_PRODUCTION: bool = False  # ✅ SEC: Never enable docs in prod
@@ -113,27 +115,37 @@ class Settings(BaseSettings):
     MONGO_URI: str = "mongodb://localhost:27017"
     MONGO_DB_NAME: str = "kolabri"
     ENABLE_MONGODB_LOGGING: bool = True
-    
+
     # MongoDB Connection Pooling (KOL-138)
     MONGO_MAX_POOL_SIZE: int = 50
     MONGO_MIN_POOL_SIZE: int = 10
     MONGO_MAX_IDLE_TIME_MS: int = 30000
     MONGO_CONNECT_TIMEOUT_MS: int = 5000
-    
+
     # Circuit Breaker Configuration (KOL-135)
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
     CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = 60
     CIRCUIT_BREAKER_SUCCESS_THRESHOLD: int = 3
-    
+
     # RAG Re-Ranking Configuration (KOL-136)
     ENABLE_RERANKING: bool = True
-    RERANK_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Backend: fastembed.rerank.cross_encoder.TextCrossEncoder (ONNX-runtime).
+    # jina-reranker-v2-base-multilingual is multilingual (incl. Indonesian) and
+    # ships an ONNX wheel via fastembed - works on Intel Mac + Python 3.13
+    # without torch. Override via env if you need a different model from
+    # TextCrossEncoder.list_supported_models().
+    RERANK_MODEL_NAME: str = "jinaai/jina-reranker-v2-base-multilingual"
     RERANK_TOP_K: int = 3
     RERANK_RETRIEVE_K: int = 10
+    # Persistent cache dir for downloaded reranker models. macOS evicts /var/folders
+    # tmp dirs unpredictably, breaking fastembed's cache integrity check. Setting an
+    # explicit project-local path avoids that. Empty string = let fastembed use its
+    # default (tmp dir).
+    RERANK_CACHE_DIR: str = ""
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 32768
+    REDIS_PORT: int = 6379
     REDIS_DB: int = 0
 
     # Efficiency Guard Configuration
@@ -173,7 +185,7 @@ class Settings(BaseSettings):
         if not self.GEMINI_API_KEY and self.GOOGLE_API_KEY:
             self.GEMINI_API_KEY = self.GOOGLE_API_KEY
         return self
-    
+
     @model_validator(mode="after")
     def validate_security_secrets(self) -> "Settings":
         """
@@ -182,34 +194,52 @@ class Settings(BaseSettings):
         """
         if self.ENV == "production":
             errors = []
-            
+
             # Check API keys
             if not self.OPENAI_API_KEY or self.OPENAI_API_KEY == "sk-kolabri":
-                errors.append("OPENAI_API_KEY (must be set via environment, not hardcoded)")
-            
+                errors.append(
+                    "OPENAI_API_KEY (must be set via environment, not hardcoded)"
+                )
+
+            # ✅ SEC: Reject default/weak secrets
             if not self.CORE_API_SECRET:
                 errors.append("CORE_API_SECRET")
-            
+            elif self.CORE_API_SECRET in [
+                "shared-secret-key",
+                "secret",
+                "default",
+                "changeme",
+            ]:
+                errors.append(
+                    "CORE_API_SECRET menggunakan nilai default yang lemah. Harap gunakan secret yang kuat."
+                )
+
+            # Check for weak API keys (< 20 chars is suspiciously short)
+            if self.OPENAI_API_KEY and len(self.OPENAI_API_KEY) < 20:
+                errors.append(
+                    "OPENAI_API_KEY terlalu pendek, kemungkinan tidak valid atau lemah"
+                )
+
             # ✅ SEC: KOL-146 - Validate HTTPS for production URLs
             if self.OPENAI_BASE_URL.startswith("http://"):
                 errors.append("OPENAI_BASE_URL must use HTTPS in production")
-            
+
             if self.CORE_API_URL.startswith("http://"):
                 errors.append("CORE_API_URL must use HTTPS in production")
-            
+
             if errors:
                 logger.critical(
-                    "Security config invalid: %s", 
-                    ', '.join(errors),
-                    extra={"missing_vars": errors}
+                    "Security config invalid: %s",
+                    ", ".join(errors),
+                    extra={"missing_vars": errors},
                 )
-                raise ValueError(
-                    f"Security configuration invalid: {', '.join(errors)}. "
-                    "Please set these via environment variables."
+                raise RuntimeError(
+                    f"❌ Konfigurasi keamanan tidak valid: {', '.join(errors)}. "
+                    "Silakan atur variabel ini melalui environment variables dengan nilai yang kuat."
                 )
-        
+
         return self
-    
+
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
         """
@@ -217,21 +247,17 @@ class Settings(BaseSettings):
         """
         if self.ENV == "production":
             if self.DEBUG:
-                logger.warning(
-                    "SECURITY WARNING: DEBUG enabled in production!"
-                )
-            
+                logger.warning("SECURITY WARNING: DEBUG enabled in production!")
+
             if self.DOCS_ENABLED or self.ENABLE_DOCS_IN_PRODUCTION:
-                logger.warning(
-                    "SECURITY WARNING: API Docs enabled in production"
-                )
-            
+                logger.warning("SECURITY WARNING: API Docs enabled in production")
+
             if self.DOCS_ENABLED or self.ENABLE_DOCS_IN_PRODUCTION:
                 logger.warning(
                     "production_docs_enabled",
-                    message="⚠️ SECURITY WARNING: API Docs enabled in production. This exposes API structure."
+                    message="⚠️ SECURITY WARNING: API Docs enabled in production. This exposes API structure.",
                 )
-        
+
         return self
 
     model_config = SettingsConfigDict(

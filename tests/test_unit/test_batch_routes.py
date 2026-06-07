@@ -216,7 +216,7 @@ def test_batch_ask_with_exception_in_one_request_isolated(mock_rag, mock_redis, 
     assert payload["successful_count"] == 1
     assert payload["failed_count"] == 1
     assert payload["results"][0]["success"] is False
-    assert payload["results"][0]["error"] == "boom"
+    assert payload["results"][0]["error"] == "Internal error"
     assert payload["results"][1]["success"] is True
 
 
@@ -392,6 +392,6 @@ async def test_process_single_ask_general_exception(mock_rag, mock_redis):
     result = await _process_single_ask(request)
 
     assert result.success is False
-    assert result.error == "unexpected failure"
+    assert result.error == "Internal error"
     assert result.answer == ""
     assert result.from_cache is False

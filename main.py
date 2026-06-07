@@ -33,8 +33,24 @@ logger = get_logger(__name__)
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import redis
 
-limiter = Limiter(key_func=get_remote_address)
+try:
+    redis_client = redis.Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        db=settings.REDIS_DB,
+        decode_responses=True,
+    )
+    redis_client.ping()
+    limiter = Limiter(
+        key_func=get_remote_address,
+        storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}",
+    )
+    logger.info("Rate limiter using Redis backend")
+except (redis.ConnectionError, redis.TimeoutError) as e:
+    logger.warning(f"Redis unavailable, using in-memory rate limiter: {e}")
+    limiter = Limiter(key_func=get_remote_address)
 
 
 async def silence_monitor_task():
@@ -42,40 +58,40 @@ async def silence_monitor_task():
     logger.info("Silence monitor background task started")
     logic_listener = get_logic_listener()
     notification_service = get_notification_service()
-    
+
     while True:
         try:
             # Check every 60 seconds
             await asyncio.sleep(60)
-            
+
             silent_groups = logic_listener.get_all_silent_groups()
-            
+
             if silent_groups:
                 logger.info(f"Detected {len(silent_groups)} silent groups")
-                
+
                 for group_id in silent_groups:
                     trigger = logic_listener.check_silence(group_id)
-                    
+
                     if trigger.should_intervene:
                         # Send to Core-API
                         success = await notification_service.send_intervention(
                             group_id=group_id,
                             message=trigger.suggested_message,
                             intervention_type="silence",
-                            metadata=trigger.metadata
+                            metadata=trigger.metadata,
                         )
-                        
+
                         if success:
                             # Update timestamp so we don't spam every minute
                             # We reset the last message time to 'now' to start the 10m timer again
                             logic_listener.update_last_message_time(group_id)
-            
+
         except asyncio.CancelledError:
             logger.info("Silence monitor task cancelled")
             break
         except Exception as e:
             logger.error(f"Error in silence monitor task: {str(e)}")
-            await asyncio.sleep(10) # Wait a bit before retry on error
+            await asyncio.sleep(10)  # Wait a bit before retry on error
 
 
 @asynccontextmanager
@@ -83,16 +99,17 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown events."""
     # Startup
     logger.info("Starting Kolabri AI-Engine", version="1.0.0", env=settings.ENV)
-    
+
     # Ensure data directories exist
     for d in ["data/event_logs", "data/static/images"]:
         import os
+
         os.makedirs(d, exist_ok=True)
-    
+
     # Initialize services
     vector_store = get_vector_store()
     await vector_store.initialize()
-    
+
     mongo_logger = get_mongo_logger()
     await mongo_logger.connect()
 
@@ -102,12 +119,12 @@ async def lifespan(app: FastAPI):
     get_notification_service()
     get_rag_pipeline()
     ConformanceChecker()
-    
+
     # Start background monitor
     monitor_task = asyncio.create_task(silence_monitor_task())
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Kolabri AI-Engine")
     monitor_task.cancel()
@@ -115,7 +132,7 @@ async def lifespan(app: FastAPI):
         await monitor_task
     except asyncio.CancelledError:
         pass
-    
+
     await mongo_logger.close()
 
 
@@ -125,8 +142,12 @@ app = FastAPI(
     title="Kolabri AI-Engine",
     description="AI computation service for collaborative learning platform",
     version="1.0.0",
-    docs_url="/docs" if (settings.ENV == "development" and settings.DOCS_ENABLED) else None,
-    redoc_url="/redoc" if (settings.ENV == "development" and settings.DOCS_ENABLED) else None,
+    docs_url="/docs"
+    if (settings.ENV == "development" and settings.DOCS_ENABLED)
+    else None,
+    redoc_url="/redoc"
+    if (settings.ENV == "development" and settings.DOCS_ENABLED)
+    else None,
     openapi_url="/openapi.json" if settings.ENV == "development" else None,
     lifespan=lifespan,
 )
@@ -143,6 +164,7 @@ from app.core.error_handlers import (
     unhandled_exception_handler,
     ExceptionMiddleware,
 )
+
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_middleware(ExceptionMiddleware)
@@ -164,13 +186,16 @@ app.add_middleware(
 
 # [PRIORITY 1] GZip Compression untuk response optimization
 from fastapi.middleware.gzip import GZipMiddleware
+
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ✅ SEC: KOL-148 - Request size limit middleware
 from app.middleware.request_size_limit import LimitRequestSizeMiddleware
-app.add_middleware(LimitRequestSizeMiddleware, max_size_bytes=10*1024*1024)
+
+app.add_middleware(LimitRequestSizeMiddleware, max_size_bytes=10 * 1024 * 1024)
 
 from app.middleware.request_id import RequestIDMiddleware, REQUEST_ID_HEADER
+
 app.add_middleware(RequestIDMiddleware)
 
 # ✅ SEC: KOL-142 - Authentication Middleware for sensitive routes
@@ -185,10 +210,12 @@ app.include_router(api_router, prefix="/api", dependencies=[Depends(require_auth
 # ✅ SEC: KOL-145 - Exception Handlers for sanitized error responses
 # Domain-specific handler kept here. Generic handlers live in app/core/error_handlers.py.
 
+
 @app.exception_handler(LLMDegradedError)
 async def llm_degraded_exception_handler(request: Request, exc: LLMDegradedError):
     """Map LLM degraded errors to HTTP 503 with structured outcome."""
     from app.core.error_handlers import _request_id_for
+
     request_id = _request_id_for(request)
     logger.warning(
         "llm_degraded_outcome",
@@ -225,7 +252,7 @@ async def root():
 
 
 if __name__ == "__main__":
-    workers = int(settings.WORKERS) if hasattr(settings, 'WORKERS') else 1
+    workers = int(settings.WORKERS) if hasattr(settings, "WORKERS") else 1
     uvicorn.run(
         "main:app",
         host=settings.HOST,

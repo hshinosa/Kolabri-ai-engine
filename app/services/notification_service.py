@@ -35,8 +35,8 @@ class NotificationService:
                         status=response.status_code,
                         url=url
                     )
-            except Exception as e:
-                logger.warning("webhook_error", attempt=attempt + 1, error=str(e))
+            except Exception:
+                logger.exception("webhook_error", attempt=attempt + 1)
             
             if attempt < max_retries - 1:
                 # Exponential backoff
@@ -61,7 +61,7 @@ class NotificationService:
             "timestamp": "now"
         }
         headers = {
-            "X-AI-Engine-Secret": self.secret,
+            "X-API-Key": self.secret,
             "Content-Type": "application/json"
         }
         
@@ -88,7 +88,7 @@ class NotificationService:
             "data": data or {}
         }
         headers = {
-            "X-AI-Engine-Secret": self.secret,
+            "X-API-Key": self.secret,
             "Content-Type": "application/json"
         }
         

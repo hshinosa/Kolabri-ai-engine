@@ -31,7 +31,12 @@ class InterventionType(str, Enum):
 
 @dataclass
 class InterventionResult:
-    """Result from intervention generation."""
+    """Result from intervention generation.
+
+    Note: ``error`` field contains user-safe messages only. Internal exception
+    details are logged via ``logger.exception(...)`` and never exposed in this
+    field. Route handlers may safely propagate ``error`` to clients.
+    """
 
     message: str
     intervention_type: InterventionType
@@ -139,9 +144,9 @@ class ChatInterventionService:
                 error=llm_response.error,
             )
 
-        except Exception as e:
-            logger.error(
-                "intervention_generation_failed", error=str(e), chat_room=chat_room_id
+        except Exception:
+            logger.exception(
+                "intervention_generation_failed", chat_room=chat_room_id
             )
 
             return InterventionResult(
@@ -149,9 +154,9 @@ class ChatInterventionService:
                 intervention_type=intervention_type,
                 confidence=confidence,
                 should_intervene=False,
-                reason=f"Generation failed: {str(e)}",
+                reason="Generation failed: internal error",
                 success=False,
-                error=str(e),
+                error="Internal error",
             )
 
     async def generate_summary(
@@ -196,9 +201,9 @@ class ChatInterventionService:
                 error=llm_response.error,
             )
 
-        except Exception as e:
-            logger.error(
-                "summary_generation_failed", error=str(e), chat_room=chat_room_id
+        except Exception:
+            logger.exception(
+                "summary_generation_failed", chat_room=chat_room_id
             )
 
             return InterventionResult(
@@ -206,9 +211,9 @@ class ChatInterventionService:
                 intervention_type=InterventionType.SUMMARIZE,
                 confidence=0,
                 should_intervene=False,
-                reason=f"Summary failed: {str(e)}",
+                reason="Summary failed: internal error",
                 success=False,
-                error=str(e),
+                error="Internal error",
             )
 
     async def generate_discussion_prompt(
@@ -268,15 +273,16 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
                 error=llm_response.error,
             )
 
-        except Exception as e:
+        except Exception:
+            logger.exception("prompt_generation_failed")
             return InterventionResult(
                 message="",
                 intervention_type=InterventionType.PROMPT,
                 confidence=0,
                 should_intervene=False,
-                reason=f"Prompt generation failed: {str(e)}",
+                reason="Prompt generation failed: internal error",
                 success=False,
-                error=str(e),
+                error="Internal error",
             )
 
     async def _check_triggers(

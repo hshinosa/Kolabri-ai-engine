@@ -39,6 +39,12 @@ class ChatMessage:
 
 @dataclass
 class LLMResponse:
+    """LLM call result.
+
+    Note: ``error`` field contains user-safe messages only. Internal exception
+    details are logged via ``logger.exception(...)`` and never exposed in this
+    field. Route handlers may safely propagate ``error`` to clients.
+    """
     content: str
     tokens_used: int
     model: str
@@ -136,12 +142,12 @@ class OpenAILLMService:
                 reason="llm_retry_exhausted",
                 retry_after=settings.LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS,
             )
-        except Exception as e:
+        except Exception:
             elapsed = (time.time() - start) * 1000
-            logger.error("llm_generation_failed", error=str(e), response_time_ms=round(elapsed, 2))
+            logger.exception("llm_generation_failed", response_time_ms=round(elapsed, 2))
             return LLMResponse(
                 content="", tokens_used=0, model=self.model, success=False,
-                error=str(e), response_time_ms=elapsed
+                error="Internal error", response_time_ms=elapsed
             )
 
     @retry(
@@ -174,9 +180,9 @@ class OpenAILLMService:
             ):
                 raise e
             # Log and return failure for other errors (no retry)
-            logger.error("llm_generation_failed", error=str(e))
+            logger.exception("llm_generation_failed")
             return LLMResponse(
-                content="", tokens_used=0, model=self.model, success=False, error=str(e)
+                content="", tokens_used=0, model=self.model, success=False, error="Internal error"
             )
 
     async def generate_rag_response(

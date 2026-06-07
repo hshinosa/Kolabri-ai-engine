@@ -9,9 +9,11 @@ pydantic-settings>=2.6.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.12
 
-# Vector Database (Qdrant) + Local Embedding
+# Vector Database (Qdrant) + Local Embedding + Reranker
+# fastembed bundles ONNX-runtime cross-encoders (jina-reranker-v2-base-multilingual)
+# so re-ranking works without torch (which has no Intel-Mac wheels for Python 3.13).
 qdrant-client[fastembed]>=1.9.0
-fastembed>=0.3.0
+fastembed>=0.7.0
 
 # MongoDB Async Driver
 motor>=3.5.0

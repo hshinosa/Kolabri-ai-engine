@@ -261,7 +261,7 @@ async def test_handle_message_returns_error_result_on_exception(orchestrator_fac
     assert result.success is False
     assert result.reply == "Maaf, terjadi kesalahan."
     assert result.action_taken == "ERROR"
-    assert result.error == "boom"
+    assert result.error == "Internal error"
 
 
 @pytest.mark.asyncio

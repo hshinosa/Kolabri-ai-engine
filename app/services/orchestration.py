@@ -27,6 +27,12 @@ logger = get_logger(__name__)
 
 @dataclass
 class OrchestrationResult:
+    """Orchestration pipeline result.
+
+    Note: ``error`` field contains user-safe messages only. Internal exception
+    details are logged via ``logger.exception(...)`` and never exposed in this
+    field. Route handlers may safely propagate ``error`` to clients.
+    """
     reply: str
     intervention: Optional[str]
     intervention_type: Optional[str]
@@ -73,7 +79,7 @@ class Orchestrator:
             bot_reply = rag_result.answer if rag_result.success else "Maaf, terjadi kesalahan."
             
             # 3. Logging & Context
-            session_id = kwargs.get('chat_room_id', '1').split('_')[-1]
+            session_id = (kwargs.get('chat_room_id') or '1').split('_')[-1]
             case_id = f"{group_id}_session_{session_id}"
             srl_obj = self.analyzer.extract_srl_object(message, default=topic or "General")
             
@@ -134,9 +140,9 @@ class Orchestrator:
 
             return OrchestrationResult(bot_reply, int_msg, int_type, self._analytics_to_dict(analytics), "FETCH" if rag_result.sources else "NO_FETCH", notify, q_score, True)
             
-        except Exception as e:
-            logger.error("orchestration_failed", error=str(e))
-            return OrchestrationResult("Maaf, terjadi kesalahan.", None, None, {}, "ERROR", False, None, False, str(e))
+        except Exception:
+            logger.exception("orchestration_failed")
+            return OrchestrationResult("Maaf, terjadi kesalahan.", None, None, {}, "ERROR", False, None, False, "Internal error")
 
     async def get_group_dashboard_data(self, group_id: str) -> Dict[str, Any]:
         """Consolidated Group Dashboard logic."""
@@ -259,9 +265,9 @@ class Orchestrator:
                 "validation": {"is_valid": True, "score": 0.8},
                 "tokens_used": result.tokens_used,
             }
-        except Exception as e:
-            logger.error("goal_refinement_failed", error=str(e))
-            return {"success": False, "error": str(e)}
+        except Exception:
+            logger.exception("goal_refinement_failed")
+            return {"success": False, "error": "Internal error"}
 
     # --- Private Helpers ---
 

@@ -108,7 +108,7 @@ async def test_analyze_session_exception_handling(analyzer, mongo_logger_mock):
     
     assert result.case_id == "chat_123"
     assert "Analysis failed" in result.insights[0]
-    assert "DB Connection Failed" in result.insights[0]
+    assert "internal error" in result.insights[0]
 
 
 # ==============================================================================

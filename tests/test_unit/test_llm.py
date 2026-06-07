@@ -245,7 +245,7 @@ async def test_no_retry_on_client_error_4xx(llm_service):
     result = await service.generate("Test")
 
     assert result.success is False
-    assert "Bad request" in result.error
+    assert result.error == "Internal error"
     assert mock_client.chat.completions.create.call_count == 1  # No retry
 
 

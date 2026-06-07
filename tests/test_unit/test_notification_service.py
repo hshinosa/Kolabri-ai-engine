@@ -14,6 +14,25 @@ class TestNotificationService:
     def notification_service(self):
         """Create notification service instance."""
         return NotificationService()
+
+    @pytest.mark.asyncio
+    async def test_send_intervention_uses_x_api_key(self, notification_service):
+        """Test send_intervention sends the shared secret with X-API-Key."""
+        with patch('app.services.notification_service.httpx.AsyncClient') as mock_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            post_mock = AsyncMock(return_value=mock_response)
+            mock_client.return_value.__aenter__.return_value.post = post_mock
+
+            await notification_service.send_intervention(
+                group_id="group_1",
+                message="Test intervention",
+                intervention_type="silence",
+            )
+
+            headers = post_mock.call_args.kwargs["headers"]
+            assert headers["X-API-Key"] == notification_service.secret
+            assert "X-AI-Engine-Secret" not in headers
     
     @pytest.mark.asyncio
     async def test_send_with_retry_success(self, notification_service):

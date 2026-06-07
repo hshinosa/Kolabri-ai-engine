@@ -17,7 +17,12 @@ class ProcessedChunk:
 
 @dataclass
 class ProcessedDocument:
-    """Result of processing a single document."""
+    """Result of processing a single document.
+
+    Note: ``error`` field contains user-safe messages only. Internal exception
+    details are logged via ``logger.exception(...)`` and never exposed in this
+    field. Route handlers may safely propagate ``error`` to clients.
+    """
 
     filename: str
     file_type: str

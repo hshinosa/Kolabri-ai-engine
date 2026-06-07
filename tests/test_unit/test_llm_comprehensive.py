@@ -106,7 +106,7 @@ class TestOpenAILLMService:
         llm_service.client.chat.completions.create = AsyncMock(side_effect=RuntimeError("Test error"))
         response = await llm_service.generate("Test prompt")
         assert response.success is False
-        assert "Test error" in response.error
+        assert response.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_generate_empty_content(self, llm_service):

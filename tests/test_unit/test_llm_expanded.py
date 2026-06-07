@@ -36,7 +36,7 @@ async def test_generate_failure(llm_service):
     llm_service.client.chat.completions.create = AsyncMock(side_effect=RuntimeError("Error"))
     response = await llm_service.generate("Hi failure")
     assert response.success is False
-    assert response.error == "Error"
+    assert response.error == "Internal error"
 
 
 @pytest.mark.asyncio

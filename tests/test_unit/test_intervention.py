@@ -162,7 +162,7 @@ class TestChatInterventionService:
         assert result.success is False
         assert result.should_intervene is False
         assert "Generation failed" in result.reason
-        assert result.error == "boom"
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_check_triggers_detects_inactivity(self, intervention_service):
@@ -291,7 +291,7 @@ class TestChatInterventionService:
 
         assert result.success is False
         assert result.should_intervene is False
-        assert result.error == "summary boom"
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_generate_discussion_prompt_success(self, intervention_service, mock_llm):
@@ -335,7 +335,7 @@ class TestChatInterventionService:
 
         assert result.success is False
         assert result.should_intervene is False
-        assert result.error == "prompt boom"
+        assert result.error == "Internal error"
 
 
 class TestGetInterventionService:

@@ -565,7 +565,7 @@ class TestRefineGoal:
             result = await validator.refine_goal("belajar", ["specific"])
 
         assert result["success"] is False
-        assert "API down" in result["error"]
+        assert result["error"] == "Internal error"
 
     @pytest.mark.asyncio
     async def test_refine_refined_goal_not_string(self, validator):
@@ -979,7 +979,7 @@ class TestAnalyzeAndIntervene:
 
         assert result.should_intervene is False
         assert result.success is False
-        assert "LLM exploded" in result.error
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_llm_response_fields_propagated(self, intervention_svc, mock_llm):
@@ -1049,7 +1049,7 @@ class TestGenerateSummary:
 
         assert result.success is False
         assert result.should_intervene is False
-        assert "boom" in result.error
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_llm_returns_error_response(self, intervention_svc, mock_llm):
@@ -1133,7 +1133,7 @@ class TestGenerateDiscussionPrompt:
 
         assert result.success is False
         assert result.should_intervene is False
-        assert "timeout" in result.error
+        assert result.error == "Internal error"
 
     @pytest.mark.asyncio
     async def test_system_prompt_passed(self, intervention_svc, mock_llm):
