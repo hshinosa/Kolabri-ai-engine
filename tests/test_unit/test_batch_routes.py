@@ -6,22 +6,22 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 # Mock heavier modules before imports
-sys.modules['chromadb'] = MagicMock()
-sys.modules['chromadb.config'] = MagicMock()
-sys.modules['chromadb.utils'] = MagicMock()
-sys.modules['hnswlib'] = MagicMock()
-sys.modules['pypdf'] = MagicMock()
-sys.modules['fitz'] = MagicMock()
-sys.modules['docx'] = MagicMock()
-sys.modules['pptx'] = MagicMock()
-sys.modules['openpyxl'] = MagicMock()
-sys.modules['pandas'] = MagicMock()
-sys.modules['PIL'] = MagicMock()
-sys.modules['motor'] = MagicMock()
-sys.modules['motor.motor_asyncio'] = MagicMock()
-sys.modules['redis.asyncio'] = MagicMock()
-sys.modules['redis'] = MagicMock()
-sys.modules['prometheus_client'] = MagicMock()
+sys.modules["chromadb"] = MagicMock()
+sys.modules["chromadb.config"] = MagicMock()
+sys.modules["chromadb.utils"] = MagicMock()
+sys.modules["hnswlib"] = MagicMock()
+sys.modules["pypdf"] = MagicMock()
+sys.modules["fitz"] = MagicMock()
+sys.modules["docx"] = MagicMock()
+sys.modules["pptx"] = MagicMock()
+sys.modules["openpyxl"] = MagicMock()
+sys.modules["pandas"] = MagicMock()
+sys.modules["PIL"] = MagicMock()
+sys.modules["motor"] = MagicMock()
+sys.modules["motor.motor_asyncio"] = MagicMock()
+sys.modules["redis.asyncio"] = MagicMock()
+sys.modules["redis"] = MagicMock()
+sys.modules["prometheus_client"] = MagicMock()
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -30,6 +30,7 @@ from app.api.batch_routes import (
     router,
     BatchAskRequest,
     BatchAskResponse,
+    BATCH_CONFIG,
     _generate_cache_key,
     _process_single_ask,
 )
@@ -79,7 +80,9 @@ def test_batch_ask_with_successful_responses(mock_rag, mock_redis, mock_llm):
                 answer="AI adalah bidang ilmu komputer",
                 sources=[{"source": "modul-ai.pdf", "page": 3}],
             ),
-            _make_rag_result(success=True, answer="ML adalah subset dari AI", sources=[]),
+            _make_rag_result(
+                success=True, answer="ML adalah subset dari AI", sources=[]
+            ),
         ]
     )
     mock_rag.return_value = rag_pipeline
@@ -122,7 +125,9 @@ def test_batch_ask_with_mixed_success_failure(mock_rag, mock_redis, mock_llm):
     rag_pipeline.query = AsyncMock(
         side_effect=[
             _make_rag_result(success=True, answer="Jawaban sukses", sources=[]),
-            _make_rag_result(success=False, answer="Jawaban gagal", error="RAG failed", sources=[]),
+            _make_rag_result(
+                success=False, answer="Jawaban gagal", error="RAG failed", sources=[]
+            ),
         ]
     )
     mock_rag.return_value = rag_pipeline
@@ -181,7 +186,9 @@ def test_batch_ask_with_cache_hit(mock_rag, mock_redis, mock_llm):
 
 
 def test_batch_ask_exceeding_max_batch_size():
-    requests = [{"query": f"Q{i}", "course_id": "c1", "request_id": str(i)} for i in range(51)]
+    requests = [
+        {"query": f"Q{i}", "course_id": "c1", "request_id": str(i)} for i in range(51)
+    ]
     response = client.post("/ask/batch", json={"requests": requests})
 
     assert response.status_code == 422
@@ -190,7 +197,9 @@ def test_batch_ask_exceeding_max_batch_size():
 @patch("app.api.batch_routes.get_llm_service")
 @patch("app.api.batch_routes.get_redis_cache")
 @patch("app.api.batch_routes.get_rag_pipeline")
-def test_batch_ask_with_exception_in_one_request_isolated(mock_rag, mock_redis, mock_llm):
+def test_batch_ask_with_exception_in_one_request_isolated(
+    mock_rag, mock_redis, mock_llm
+):
     mock_llm.return_value = MagicMock()
     redis_cache = MagicMock()
     redis_cache.get = AsyncMock(return_value=None)
@@ -198,7 +207,12 @@ def test_batch_ask_with_exception_in_one_request_isolated(mock_rag, mock_redis, 
     mock_redis.return_value = redis_cache
 
     rag_pipeline = MagicMock()
-    rag_pipeline.query = AsyncMock(side_effect=[RuntimeError("boom"), _make_rag_result(success=True, answer="still works")])
+    rag_pipeline.query = AsyncMock(
+        side_effect=[
+            RuntimeError("boom"),
+            _make_rag_result(success=True, answer="still works"),
+        ]
+    )
     mock_rag.return_value = rag_pipeline
 
     response = client.post(
@@ -273,7 +287,9 @@ def test_precomputed_batch_with_all_cache_misses(mock_rag, mock_redis, mock_llm)
     assert payload["successful_count"] == 0
     assert payload["failed_count"] == 2
     assert payload["from_cache_count"] == 0
-    assert all(result["error"] == "Query not pre-computed" for result in payload["results"])
+    assert all(
+        result["error"] == "Query not pre-computed" for result in payload["results"]
+    )
 
 
 @patch("app.api.batch_routes.get_llm_service")
@@ -310,7 +326,9 @@ def test_generate_cache_key_deterministic():
 
     key_1 = _generate_cache_key(request)
     key_2 = _generate_cache_key(request)
-    key_3 = _generate_cache_key(_make_request(query="different query", course_id="same-course"))
+    key_3 = _generate_cache_key(
+        _make_request(query="different query", course_id="same-course")
+    )
 
     assert key_1 == key_2
     assert key_1.startswith("rag:batch:")
@@ -339,7 +357,9 @@ async def test_process_single_ask_success_path(mock_rag, mock_redis):
     )
     mock_rag.return_value = rag_pipeline
 
-    request = _make_request(query="jelaskan materi", course_id="if101", request_id="proc-1")
+    request = _make_request(
+        query="jelaskan materi", course_id="if101", request_id="proc-1"
+    )
     result = await _process_single_ask(request)
 
     assert isinstance(result, BatchAskResponse)
@@ -394,4 +414,22 @@ async def test_process_single_ask_general_exception(mock_rag, mock_redis):
     assert result.success is False
     assert result.error == "Internal error"
     assert result.answer == ""
+    assert result.from_cache is False
+
+
+@pytest.mark.asyncio
+@patch("app.api.batch_routes.BATCH_CONFIG", {**BATCH_CONFIG, "enable_caching": False})
+@patch("app.api.batch_routes.get_rag_pipeline")
+async def test_process_single_ask_without_cache(mock_rag):
+    rag_pipeline = MagicMock()
+    rag_pipeline.query = AsyncMock(
+        return_value=_make_rag_result(success=True, answer="no cache")
+    )
+    mock_rag.return_value = rag_pipeline
+
+    request = _make_request(request_id="nocache-1")
+    result = await _process_single_ask(request)
+
+    assert result.success is True
+    assert result.answer == "no cache"
     assert result.from_cache is False

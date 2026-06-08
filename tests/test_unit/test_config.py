@@ -3,31 +3,21 @@ import os
 from unittest.mock import patch
 from app.core.config import Settings
 
+
 @pytest.mark.unit
 def test_settings_overrides():
     # Test loading from environment
-    with patch.dict(os.environ, {
-        'OPENAI_API_KEY': 'env_key',
-        'OPENAI_MODEL': 'env_model'
-    }):
+    with patch.dict(
+        os.environ, {"OPENAI_API_KEY": "env_key", "OPENAI_MODEL": "env_model"}
+    ):
         settings = Settings()
-        assert settings.OPENAI_API_KEY == 'env_key'
-        assert settings.OPENAI_MODEL == 'env_model'
-
-@pytest.mark.unit
-def test_gemini_api_key_fallback():
-    # Test validation logic for fallback
-    with patch.dict(os.environ, {
-        'GOOGLE_API_KEY': 'google_val',
-        'GEMINI_API_KEY': ''
-    }):
-        settings = Settings()
-        assert settings.GEMINI_API_KEY == 'google_val'
+        assert settings.OPENAI_API_KEY == "env_key"
+        assert settings.OPENAI_MODEL == "env_model"
 
 
 @pytest.mark.unit
 def test_production_settings_require_security_secrets():
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         Settings(
             ENV="production",
             OPENAI_API_KEY="",
@@ -45,7 +35,7 @@ def test_production_settings_require_security_secrets():
 
 @pytest.mark.unit
 def test_production_settings_reject_hardcoded_placeholder_key():
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         Settings(
             ENV="production",
             OPENAI_API_KEY="sk-kolabri",
@@ -75,8 +65,8 @@ def test_production_settings_warn_on_debug_enabled():
     with patch("app.core.config.logger.warning") as mock_warning:
         settings = Settings(
             ENV="production",
-            OPENAI_API_KEY="prod-key",
-            CORE_API_SECRET="prod-secret",
+            OPENAI_API_KEY="a-very-long-production-openai-key-1234567890abcdef",
+            CORE_API_SECRET="a-very-long-production-core-secret-1234567890abcdef",
             DEBUG=True,
             OPENAI_BASE_URL="https://api.openai.com/v1",
             CORE_API_URL="https://api.kolabri.com",
@@ -91,8 +81,8 @@ def test_production_settings_warn_twice_when_docs_enabled():
     with patch("app.core.config.logger.warning") as mock_warning:
         settings = Settings(
             ENV="production",
-            OPENAI_API_KEY="prod-key",
-            CORE_API_SECRET="prod-secret",
+            OPENAI_API_KEY="a-very-long-production-openai-key-1234567890abcdef",
+            CORE_API_SECRET="a-very-long-production-core-secret-1234567890abcdef",
             DOCS_ENABLED=True,
             OPENAI_BASE_URL="https://api.openai.com/v1",
             CORE_API_URL="https://api.kolabri.com",
@@ -112,8 +102,8 @@ def test_production_settings_warn_twice_when_enable_docs_in_production_flag_enab
     with patch("app.core.config.logger.warning") as mock_warning:
         settings = Settings(
             ENV="production",
-            OPENAI_API_KEY="prod-key",
-            CORE_API_SECRET="prod-secret",
+            OPENAI_API_KEY="a-very-long-production-openai-key-1234567890abcdef",
+            CORE_API_SECRET="a-very-long-production-core-secret-1234567890abcdef",
             ENABLE_DOCS_IN_PRODUCTION=True,
             OPENAI_BASE_URL="https://api.openai.com/v1",
             CORE_API_URL="https://api.kolabri.com",

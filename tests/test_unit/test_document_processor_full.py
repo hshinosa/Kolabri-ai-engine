@@ -31,7 +31,9 @@ from dataclasses import dataclass
 
 import pytest
 import numpy as np
-import sys; Image = sys.modules["PIL.Image"]
+import sys
+
+Image = sys.modules["PIL.Image"]
 
 # ---------------------------------------------------------------------------
 # Patch heavy external imports BEFORE importing the module under test
@@ -71,7 +73,7 @@ def _make_processor(**overrides) -> DocumentProcessor:
         mock_settings.ENABLE_OCR = False
         mock_settings.ENABLE_MULTIMODAL_PROCESSING = False
         mock_settings.GEMINI_API_KEY = ""
-        mock_settings.GEMINI_VISION_MODEL = "gemini-2.0-flash"
+        # Gemini-specific mock removed
         mock_settings.MIN_IMAGE_WIDTH = 250
         mock_settings.MIN_IMAGE_HEIGHT = 250
 
@@ -121,8 +123,10 @@ def _large_png_bytes(width=300, height=300) -> bytes:
 def _patch_pil_image():
     """Ensure document_processor and text_extraction use our fake PIL Image module."""
     _Image = sys.modules.get("PIL.Image")
-    with patch("app.services.document_processor.Image", _Image), \
-         patch("app.services.document_processing.text_extraction.Image", _Image):
+    with (
+        patch("app.services.document_processor.Image", _Image),
+        patch("app.services.document_processing.text_extraction.Image", _Image),
+    ):
         yield
 
 
@@ -1203,32 +1207,6 @@ class TestProcessPdf:
         assert r.image_count == 0
 
     @pytest.mark.asyncio
-    async def test_pdf_multimodal_vision_captions(self, proc_vision):
-        page = self._make_mock_page(
-            text="Some page text that is long enough to skip ocr threshold limit.",
-            images=[(42,)],  # one image entry
-        )
-        mock_doc = self._make_mock_pdf_doc([page])
-        mock_doc.extract_image.return_value = {"image": _large_png_bytes()}
-
-        proc_vision._generate_image_caption = AsyncMock(return_value="A diagram of X")
-
-        with (
-            patch("app.services.document_processor.fitz") as mock_fitz,
-            patch("app.services.document_processor.settings") as ms,
-        ):
-            ms.MIN_IMAGE_WIDTH = 100
-            ms.MIN_IMAGE_HEIGHT = 100
-            ms.MAX_IMAGES_PER_PAGE = 3
-            mock_fitz.open.return_value = mock_doc
-            mock_doc.__iter__ = Mock(return_value=iter([page]))
-
-            r = await proc_vision._process_pdf(b"pdf", "t.pdf", "d")
-
-        assert r.image_count >= 1
-        assert any("GAMBAR VISUAL" in c.text for c in r.chunks)
-
-    @pytest.mark.asyncio
     async def test_pdf_vision_skips_small_images(self, proc_vision):
         page = self._make_mock_page(
             text="Some text content " * 5,
@@ -1663,71 +1641,10 @@ class TestProcessImage:
 
 class TestGenerateImageCaption:
     @pytest.mark.asyncio
-    async def test_no_vision_model_returns_empty(self, proc):
-        proc._vision_model = None
+    async def test_no_vision_client_returns_empty(self, proc):
+        proc._vision_client = None
         img = Image.new("RGB", (10, 10))
         result = await proc._generate_image_caption(img)
-        assert result == ""
-        img.close()
-
-    @pytest.mark.asyncio
-    async def test_successful_caption(self, proc_vision):
-        mock_response = MagicMock()
-        mock_response.text = "  A detailed diagram  "
-        proc_vision._vision_model.generate_content.return_value = mock_response
-
-        img = Image.new("RGB", (10, 10))
-
-        with patch("app.services.document_processor._thread_pool") as mock_pool:
-            # run_in_executor should call the lambda synchronously for testing
-            loop = asyncio.get_event_loop()
-
-            async def fake_run_in_executor(pool, func):
-                return func()
-
-            with patch.object(
-                loop, "run_in_executor", side_effect=fake_run_in_executor
-            ):
-                result = await proc_vision._generate_image_caption(img)
-
-        assert result == "A detailed diagram"
-        img.close()
-
-    @pytest.mark.asyncio
-    async def test_caption_rgba_to_rgb_conversion(self, proc_vision):
-        mock_response = MagicMock()
-        mock_response.text = "Caption"
-        proc_vision._vision_model.generate_content.return_value = mock_response
-
-        img = Image.new("RGBA", (10, 10))  # Non-RGB mode
-
-        loop = asyncio.get_event_loop()
-
-        async def fake_run_in_executor(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_run_in_executor):
-            result = await proc_vision._generate_image_caption(img)
-
-        assert result == "Caption"
-        img.close()
-
-    @pytest.mark.asyncio
-    async def test_caption_api_exception_returns_empty(self, proc_vision):
-        proc_vision._vision_model.generate_content.side_effect = RuntimeError(
-            "API error"
-        )
-
-        img = Image.new("RGB", (10, 10))
-
-        loop = asyncio.get_event_loop()
-
-        async def fake_run_in_executor(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_run_in_executor):
-            result = await proc_vision._generate_image_caption(img)
-
         assert result == ""
         img.close()
 
@@ -1759,10 +1676,15 @@ class TestOcrMethods:
         """Small RGB image goes straight through without resize."""
         img = Image.new("RGB", (100, 100))
 
-        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="recognized"):
+        with patch(
+            "app.services.document_processing.image_extraction.run_paddle_ocr",
+            return_value="recognized",
+        ):
             loop = asyncio.get_event_loop()
+
             async def fake_exec(pool, func):
                 return func()
+
             with patch.object(loop, "run_in_executor", side_effect=fake_exec):
                 result = await proc_ocr._run_ocr_optimized(img)
 
@@ -1774,10 +1696,15 @@ class TestOcrMethods:
         """Images larger than MAX_IMAGE_SIZE get thumbnailed."""
         img = Image.new("RGB", (2000, 2000))
 
-        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="resized-ocr"):
+        with patch(
+            "app.services.document_processing.image_extraction.run_paddle_ocr",
+            return_value="resized-ocr",
+        ):
             loop = asyncio.get_event_loop()
+
             async def fake_exec(pool, func):
                 return func()
+
             with patch.object(loop, "run_in_executor", side_effect=fake_exec):
                 result = await proc_ocr._run_ocr_optimized(img)
 
@@ -1790,10 +1717,15 @@ class TestOcrMethods:
         """Non-RGB images are converted to RGB."""
         img = Image.new("L", (100, 100))
 
-        with patch("app.services.document_processing.image_extraction.run_paddle_ocr", return_value="gray-ocr"):
+        with patch(
+            "app.services.document_processing.image_extraction.run_paddle_ocr",
+            return_value="gray-ocr",
+        ):
             loop = asyncio.get_event_loop()
+
             async def fake_exec(pool, func):
                 return func()
+
             with patch.object(loop, "run_in_executor", side_effect=fake_exec):
                 result = await proc_ocr._run_ocr_optimized(img)
 
@@ -1939,7 +1871,10 @@ class TestRunPageOcr:
     async def test_render_success(self, proc_ocr):
         fake_img = Image.new("RGB", (100, 100))
 
-        with patch("app.services.document_processing.image_extraction.run_ocr_optimized", return_value="page ocr text"):
+        with patch(
+            "app.services.document_processing.image_extraction.run_ocr_optimized",
+            return_value="page ocr text",
+        ):
             with patch("app.services.document_processor.fitz") as mock_fitz:
                 mock_fitz.Matrix.return_value = MagicMock()
                 page = MagicMock()
@@ -1950,8 +1885,10 @@ class TestRunPageOcr:
                 page.get_pixmap.return_value = pix
 
                 loop = asyncio.get_event_loop()
+
                 async def fake_exec(pool, func):
                     return func()
+
                 with patch.object(loop, "run_in_executor", side_effect=fake_exec):
                     result = await proc_ocr._run_page_ocr(page)
 
@@ -1998,7 +1935,10 @@ class TestInitializeOcrEngine:
         mock_engine = MagicMock()
         with (
             patch("app.services.document_processor.OCR_AVAILABLE", True),
-            patch("app.services.document_processing.image_extraction.initialize_ocr_engine", return_value=mock_engine),
+            patch(
+                "app.services.document_processing.image_extraction.initialize_ocr_engine",
+                return_value=mock_engine,
+            ),
         ):
             proc._initialize_ocr_engine()
         assert proc._ocr_engine is mock_engine
@@ -2185,26 +2125,6 @@ class TestInitBranches:
             ms.OCR_LANGUAGE = "en"
             p = DocumentProcessor()
             assert p.ocr_available is True
-
-    def test_init_vision_enabled_with_api_key(self):
-        mock_genai = MagicMock()
-        with (
-            patch("app.services.document_processor.OCR_AVAILABLE", False),
-            patch("app.services.document_processor.VISION_AVAILABLE", True),
-            patch("app.services.document_processor.genai", mock_genai),
-            patch("app.services.document_processor.settings") as ms,
-        ):
-            ms.CHUNK_SIZE = 1000
-            ms.CHUNK_OVERLAP = 200
-            ms.MAX_FILE_SIZE_MB = 10
-            ms.MAX_ZIP_SIZE_MB = 50
-            ms.ENABLE_OCR = False
-            ms.ENABLE_MULTIMODAL_PROCESSING = True
-            ms.GEMINI_API_KEY = "test-key"
-            ms.GEMINI_VISION_MODEL = "gemini-2.0-flash"
-            p = DocumentProcessor()
-            mock_genai.configure.assert_called_once_with(api_key="test-key")
-            assert p._vision_model is not None
 
     def test_init_ocr_enabled_but_import_error(self):
         with (
@@ -2462,7 +2382,9 @@ class TestUncoveredLines:
     @pytest.mark.asyncio
     async def test_process_image_finally_cleanup_when_img_none(self, proc_vision):
         """Cover _process_image finally when img is None (Image.open fails early)."""
-        with patch("app.services.document_processing.image_extraction.Image") as mock_img_mod:
+        with patch(
+            "app.services.document_processing.image_extraction.Image"
+        ) as mock_img_mod:
             mock_img_mod.open.side_effect = RuntimeError("bad image data")
             with pytest.raises(RuntimeError, match="bad image data"):
                 await proc_vision._process_image(b"bad", "img.jpg", "d")
@@ -2493,6 +2415,42 @@ class TestModuleLevelImports:
 
         # OCR_IMPORT_ERROR is either None or a string
         assert mod.OCR_IMPORT_ERROR is None or isinstance(mod.OCR_IMPORT_ERROR, str)
+
+    def test_ocr_import_branch_without_paddle_dependency(self, monkeypatch):
+        import importlib
+
+        import app.services.document_processor as mod
+
+        monkeypatch.setattr(mod.importlib.util, "find_spec", lambda _name: None)
+        reloaded = importlib.reload(mod)
+
+        assert reloaded.OCR_AVAILABLE is False
+        assert isinstance(reloaded.OCR_IMPORT_ERROR, str)
+
+    def test_vision_openai_init_branch(self, monkeypatch):
+        import app.services.document_processor as mod
+        import types
+
+        monkeypatch.setattr(mod, "VISION_AVAILABLE", True)
+        monkeypatch.setattr(mod.settings, "ENABLE_MULTIMODAL_PROCESSING", True)
+        monkeypatch.setattr(mod.settings, "OPENAI_API_KEY", "test-openai-key")
+        monkeypatch.setattr(
+            mod.settings, "OPENAI_BASE_URL", "https://example.invalid/v1"
+        )
+        monkeypatch.setattr(mod.settings, "OPENAI_MODEL", "test-model")
+
+        mock_openai = MagicMock()
+        fake_openai_module = types.SimpleNamespace(
+            OpenAI=MagicMock(return_value=mock_openai)
+        )
+        with patch.dict("sys.modules", {"openai": fake_openai_module}):
+            processor = mod.DocumentProcessor()
+
+        fake_openai_module.OpenAI.assert_called_once_with(
+            api_key="test-openai-key",
+            base_url="https://example.invalid/v1",
+        )
+        assert processor._vision_client is mock_openai
 
 
 # ===========================================================================
@@ -2627,30 +2585,13 @@ class TestEdgeCaseBranches:
         mock_engine = MagicMock()
         with (
             patch("app.services.document_processor.OCR_AVAILABLE", True),
-            patch("app.services.document_processing.image_extraction.initialize_ocr_engine", return_value=mock_engine),
+            patch(
+                "app.services.document_processing.image_extraction.initialize_ocr_engine",
+                return_value=mock_engine,
+            ),
         ):
             proc._initialize_ocr_engine()
         assert proc._ocr_engine is mock_engine
-
-    @pytest.mark.asyncio
-    async def test_generate_caption_rgb_image_no_conversion(self, proc_vision):
-        """Cover branch where image.mode == 'RGB' → no conversion needed."""
-        mock_response = MagicMock()
-        mock_response.text = "  RGB Caption  "
-        proc_vision._vision_model.generate_content.return_value = mock_response
-
-        img = Image.new("RGB", (10, 10))
-
-        loop = asyncio.get_event_loop()
-
-        async def fake_run_in_executor(pool, func):
-            return func()
-
-        with patch.object(loop, "run_in_executor", side_effect=fake_run_in_executor):
-            result = await proc_vision._generate_image_caption(img)
-
-        assert result == "RGB Caption"
-        img.close()
 
     @pytest.mark.asyncio
     async def test_store_chunks_exact_batch_boundary(self, proc):

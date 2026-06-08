@@ -370,7 +370,9 @@ class TestIngestEndpoint:
         with patch("app.api.routes.documents.tempfile.mkstemp") as mock_mkstemp:
             # Return a fake fd and path, then make os.fdopen raise
             mock_mkstemp.return_value = (999, "/tmp/fake_path")
-            with patch("app.api.routes.documents.os.fdopen", side_effect=OSError("disk full")):
+            with patch(
+                "app.api.routes.documents.os.fdopen", side_effect=OSError("disk full")
+            ):
                 with patch("app.api.routes.documents.os.unlink"):
                     resp = client.post(
                         "/api/ingest",
@@ -436,14 +438,17 @@ class TestHealthEndpoint:
             patch("app.api.routes.health.get_vector_store") as mock_vs,
             patch("app.services.llm.get_llm_service") as mock_llm_fn,
             patch("app.services.mongodb_logger.get_mongo_logger", return_value=mongo),
-            patch("app.core.redis_cache.get_redis_cache", AsyncMock(return_value=redis_cache)),
+            patch(
+                "app.core.redis_cache.get_redis_cache",
+                AsyncMock(return_value=redis_cache),
+            ),
         ):
             vs = MagicMock()
             vs._ensure_collection = AsyncMock()
             mock_vs.return_value = vs
 
             llm = MagicMock()
-            llm.model = "gemini-2.5-flash"
+            llm.model = "deepseek/deepseek-chat"
             mock_llm_fn.return_value = llm
 
             resp = client.get("/api/health")
@@ -1532,7 +1537,10 @@ class TestProcessIngestBackground:
 
         with (
             patch("app.api.routes.documents.get_document_processor") as mock_dp,
-            patch("app.api.routes.documents.os.unlink", side_effect=OSError("no such file")),
+            patch(
+                "app.api.routes.documents.os.unlink",
+                side_effect=OSError("no such file"),
+            ),
             patch("app.api.routes.documents.gc.collect"),
         ):
             proc = MagicMock()
@@ -1700,8 +1708,13 @@ class TestIngestEdgeCases:
         """When temp write fails AND os.unlink also fails (covers L229-230)."""
         with (
             patch("app.api.routes.documents.tempfile.mkstemp") as mock_mkstemp,
-            patch("app.api.routes.documents.os.fdopen", side_effect=IOError("disk full")),
-            patch("app.api.routes.documents.os.unlink", side_effect=OSError("already gone")),
+            patch(
+                "app.api.routes.documents.os.fdopen", side_effect=IOError("disk full")
+            ),
+            patch(
+                "app.api.routes.documents.os.unlink",
+                side_effect=OSError("already gone"),
+            ),
         ):
             mock_mkstemp.return_value = (999, "/tmp/fake_path")
 
