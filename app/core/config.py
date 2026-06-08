@@ -47,14 +47,7 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: int = 2048
 
-    # Google Gemini API (Legacy, kept for compatibility)
-    GOOGLE_API_KEY: str = ""
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_EMBEDDING_MODEL: str = "models/text-embedding-004"
-    GEMINI_TEMPERATURE: float = 0.7
-    GEMINI_TOP_P: float = 0.95
-    GEMINI_MAX_OUTPUT_TOKENS: int = 2048
+    # No Google services used (project focuses on OpenAI-compatible only)
 
     # Vector Database (Qdrant)
     QDRANT_URL: str = "http://localhost:6333"
@@ -73,7 +66,6 @@ class Settings(BaseSettings):
 
     # [PHASE 4: MULTIMODAL RAG]
     ENABLE_MULTIMODAL_PROCESSING: bool = True
-    GEMINI_VISION_MODEL: str = "gpt-4o-mini"
     MIN_IMAGE_WIDTH: int = 250
     MIN_IMAGE_HEIGHT: int = 250
     STORAGE_IMAGE_DIR: str = "./data/static/images"
@@ -178,13 +170,6 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_CONNECT_SECONDS: float = 10.0
     LLM_TIMEOUT_READ_SECONDS: float = 90.0
     LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS: int = 30
-
-    @model_validator(mode="after")
-    def set_gemini_api_key(self) -> "Settings":
-        """Use GOOGLE_API_KEY as fallback for GEMINI_API_KEY."""
-        if not self.GEMINI_API_KEY and self.GOOGLE_API_KEY:
-            self.GEMINI_API_KEY = self.GOOGLE_API_KEY
-        return self
 
     @model_validator(mode="after")
     def validate_security_secrets(self) -> "Settings":

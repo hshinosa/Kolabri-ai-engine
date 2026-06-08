@@ -35,7 +35,6 @@ from app.services.document_processing.models import ProcessedDocument, Processed
 
 # Multimodal / Vision
 VISION_AVAILABLE = False
-genai = None
 
 # PDF Processing
 from pypdf import PdfReader
@@ -143,27 +142,25 @@ class DocumentProcessor:
         )
         self._ocr_engine = None
         self._vision_client = None
-        self._vision_model = None
 
         # Idempotency: Track processed content hashes
         self._processed_hashes: Dict[str, str] = {}  # hash -> document_id
 
         if self.ocr_available:
-            from app.services.document_processing.image_extraction import initialize_ocr_engine
+            from app.services.document_processing.image_extraction import (
+                initialize_ocr_engine,
+            )
+
             self._ocr_engine = initialize_ocr_engine()
 
-        if self.vision_available and getattr(settings, "GEMINI_API_KEY", "") and genai:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            self._vision_model = genai.GenerativeModel(settings.GEMINI_VISION_MODEL)
-            logger.info("Gemini Vision initialized", model=settings.GEMINI_VISION_MODEL)
-        elif self.vision_available and settings.OPENAI_API_KEY:
+        if self.vision_available and settings.OPENAI_API_KEY:
             from openai import OpenAI
 
             self._vision_client = OpenAI(
                 api_key=settings.OPENAI_API_KEY,
                 base_url=settings.OPENAI_BASE_URL,
             )
-            logger.info("OpenAI Vision initialized", model=settings.GEMINI_VISION_MODEL)
+            logger.info("OpenAI Vision initialized", model=settings.OPENAI_MODEL)
         elif settings.ENABLE_OCR:
             if OCR_IMPORT_ERROR:
                 logger.warning(
@@ -660,8 +657,13 @@ class DocumentProcessor:
         file_path: Optional[str] = None,
     ) -> ProcessedDocument:
         from app.services.document_processing.text_extraction import process_pdf
+
         return await process_pdf(
-            content, filename, document_id, metadata, file_path,
+            content,
+            filename,
+            document_id,
+            metadata,
+            file_path,
             ocr_available=self.ocr_available,
             vision_available=self.vision_available,
             min_text_length_for_ocr=self.MIN_TEXT_LENGTH_FOR_OCR,
@@ -683,8 +685,12 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
         from app.services.document_processing.text_extraction import process_docx
+
         return await process_docx(
-            content, filename, document_id, metadata,
+            content,
+            filename,
+            document_id,
+            metadata,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             ocr_available=self.ocr_available,
@@ -701,8 +707,12 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
         from app.services.document_processing.text_extraction import process_pptx
+
         return await process_pptx(
-            content, filename, document_id, metadata,
+            content,
+            filename,
+            document_id,
+            metadata,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
             ocr_available=self.ocr_available,
@@ -719,8 +729,13 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
         from app.services.document_processing.text_extraction import process_text
+
         return await process_text(
-            content, filename, document_id, file_type, metadata,
+            content,
+            filename,
+            document_id,
+            file_type,
+            metadata,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
         )
@@ -733,6 +748,7 @@ class DocumentProcessor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProcessedDocument:
         from app.services.document_processing import image_extraction
+
         return await image_extraction.process_image(
             content=content,
             filename=filename,
@@ -745,14 +761,17 @@ class DocumentProcessor:
 
     async def _generate_image_caption(self, image: Image.Image) -> str:
         from app.services.document_processing import image_extraction
+
         return await image_extraction.generate_image_caption(
             image,
-            vision_model=self._vision_model,
             vision_client=self._vision_client,
         )
 
     def _extract_images_from_docx(self, doc_content: bytes):
-        from app.services.document_processing.text_extraction import _extract_images_from_docx
+        from app.services.document_processing.text_extraction import (
+            _extract_images_from_docx,
+        )
+
         yield from _extract_images_from_docx(doc_content)
 
     async def _process_extracted_images(self, images: List[Image.Image]) -> str:
@@ -772,6 +791,7 @@ class DocumentProcessor:
         if self._ocr_engine is not None or not OCR_AVAILABLE:
             return
         from app.services.document_processing import image_extraction
+
         engine = image_extraction.initialize_ocr_engine()
         if engine is None:
             self.ocr_available = False
@@ -784,10 +804,12 @@ class DocumentProcessor:
         if not self._ocr_engine:
             self._initialize_ocr_engine()
         from app.services.document_processing import image_extraction
+
         return image_extraction.run_paddle_ocr(image, self._ocr_engine)
 
     async def _run_ocr_optimized(self, image: Image.Image) -> str:
         from app.services.document_processing import image_extraction
+
         return await image_extraction.run_ocr_optimized(
             image,
             ocr_available=self.ocr_available,
@@ -797,6 +819,7 @@ class DocumentProcessor:
 
     async def _run_page_ocr(self, page: fitz.Page) -> str:
         from app.services.document_processing import image_extraction
+
         return await image_extraction.run_page_ocr(
             page,
             ocr_available=self.ocr_available,

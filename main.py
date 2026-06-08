@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
@@ -34,23 +35,31 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import redis
+from redis.exceptions import RedisError
 
-try:
-    redis_client = redis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        decode_responses=True,
-    )
-    redis_client.ping()
-    limiter = Limiter(
-        key_func=get_remote_address,
-        storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}",
-    )
-    logger.info("Rate limiter using Redis backend")
-except (redis.ConnectionError, redis.TimeoutError) as e:
-    logger.warning(f"Redis unavailable, using in-memory rate limiter: {e}")
-    limiter = Limiter(key_func=get_remote_address)
+
+def _init_rate_limiter() -> Limiter:
+    """Initialize rate limiter with Redis backend or graceful fallback."""
+    try:
+        client = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            decode_responses=True,
+        )
+        client.ping()
+        logger.info("Rate limiter using Redis backend")
+        return Limiter(
+            key_func=get_remote_address,
+            storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}",
+        )
+    except RedisError as e:
+        logger.warning(f"Redis unavailable, using in-memory rate limiter: {e}")
+        return Limiter(key_func=get_remote_address)
+
+
+# Rate limiter is initialized lazily inside the FastAPI lifespan handler
+limiter: Optional[Limiter] = None
 
 
 async def silence_monitor_task():
@@ -120,6 +129,11 @@ async def lifespan(app: FastAPI):
     get_rag_pipeline()
     ConformanceChecker()
 
+    # Initialize rate limiter (truly lazy - only runs at app startup)
+    global limiter
+    limiter = _init_rate_limiter()
+    app.state.limiter = limiter
+
     # Start background monitor
     monitor_task = asyncio.create_task(silence_monitor_task())
 
@@ -152,8 +166,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ✅ SEC: KOL-142c - Configure rate limiter
-app.state.limiter = limiter
+# ✅ SEC: KOL-142c - Configure rate limiter exception handler
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 from fastapi.exceptions import RequestValidationError

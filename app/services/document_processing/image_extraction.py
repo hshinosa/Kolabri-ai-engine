@@ -18,6 +18,7 @@ from app.services.document_processing.models import ProcessedDocument, Processed
 OCR_IMPORT_ERROR: Optional[str] = None
 try:
     from paddleocr import PaddleOCR
+
     if importlib.util.find_spec("paddle") is None:
         raise ImportError("paddlepaddle is not installed")
     OCR_AVAILABLE = True
@@ -92,10 +93,7 @@ async def run_ocr_optimized(
         return ""
 
     try:
-        if (
-            image.width > max_image_size[0]
-            or image.height > max_image_size[1]
-        ):
+        if image.width > max_image_size[0] or image.height > max_image_size[1]:
             image.thumbnail(max_image_size, Image.Resampling.LANCZOS)
 
         original_image = image
@@ -172,10 +170,9 @@ async def run_page_ocr(
 async def generate_image_caption(
     image: Image.Image,
     *,
-    vision_model=None,
     vision_client=None,
 ) -> str:
-    if not vision_model and not vision_client:
+    if not vision_client:
         return ""
 
     try:
@@ -196,22 +193,13 @@ async def generate_image_caption(
 
         loop = asyncio.get_running_loop()
 
-        if vision_model:
-            response = await loop.run_in_executor(
-                _thread_pool,
-                lambda: vision_model.generate_content([prompt, prepared_image]),
-            )
-            if prepared_image is not image:
-                prepared_image.close()
-            return getattr(response, "text", "").strip()
-
         import base64
 
         base64_image = base64.b64encode(img_bytes).decode("utf-8")
         response = await loop.run_in_executor(
             _thread_pool,
             lambda: vision_client.chat.completions.create(
-                model=settings.GEMINI_VISION_MODEL,
+                model=settings.OPENAI_MODEL,
                 messages=[
                     {
                         "role": "user",
@@ -273,13 +261,17 @@ async def process_image(
 
         full_text = f"=== [GAMBAR: {filename}] ===\nDeskripsi Visual: {caption}\n========================"
 
-        chunks = create_chunks_fn(
-            text=full_text,
-            document_id=document_id,
-            filename=filename,
-            page_number=1,
-            metadata={**(metadata or {}), "is_multimodal": True},
-        ) if create_chunks_fn else []
+        chunks = (
+            create_chunks_fn(
+                text=full_text,
+                document_id=document_id,
+                filename=filename,
+                page_number=1,
+                metadata={**(metadata or {}), "is_multimodal": True},
+            )
+            if create_chunks_fn
+            else []
+        )
 
         return ProcessedDocument(
             filename=filename,
