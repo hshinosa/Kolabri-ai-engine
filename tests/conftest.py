@@ -96,6 +96,8 @@ sys.modules["motor"] = MagicMock()
 sys.modules["motor.motor_asyncio"] = MagicMock()
 sys.modules["redis.asyncio"] = MagicMock()
 sys.modules["redis"] = MagicMock()
+sys.modules["redis.exceptions"] = MagicMock()
+sys.modules["redis.exceptions"].RedisError = Exception
 sys.modules["prometheus_client"] = MagicMock()
 sys.modules["psutil"] = MagicMock()
 
