@@ -4,15 +4,21 @@ RAG ask & personal chat endpoints.
 
 import json as _json
 import re
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from openai.types.chat import ChatCompletionMessageParam
 
 from app.api.schemas import (
     AskRequest,
     AskResponse,
     PersonalChatRequest,
     PersonalChatResponse,
+    ReadingRecommendationFallback,
+    ReadingRecommendationItem,
+    ReadingRecommendationRequest,
+    ReadingRecommendationResponse,
 )
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -31,6 +37,18 @@ PERSONAL_CHAT_SYSTEM_PROMPT = (
 )
 
 COURSE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+MIN_RELEVANCE_SCORE = 0.15
+
+
+def build_recommendation_fallback() -> ReadingRecommendationResponse:
+    return ReadingRecommendationResponse(
+        success=True,
+        recommendations=[],
+        fallback=ReadingRecommendationFallback(
+            message="Belum ada materi relevan yang siap direkomendasikan untuk topik ini.",
+            suggestedNextStep="Persempit topik atau minta dosen mengunggah materi tambahan ke knowledge base course ini.",
+        ),
+    )
 
 
 def validate_course_id(course_id: str) -> str:
@@ -60,6 +78,7 @@ async def ask_question(request: AskRequest):
             query=request.query,
             collection_name=collection_name,
             n_results=settings.TOP_K_RESULTS,
+            guardrail_context={"guardrail_policy": request.guardrail_policy or {}},
         )
 
         if result.success:
@@ -93,6 +112,78 @@ async def ask_question(request: AskRequest):
 
 
 @router.post(
+    "/reading-recommendations",
+    response_model=ReadingRecommendationResponse,
+    tags=["Core-API Integration"],
+    summary="Structured reading recommendations from course knowledge base",
+)
+async def get_reading_recommendations(request: ReadingRecommendationRequest):
+    try:
+        validate_course_id(request.course_id)
+
+        rag_pipeline = get_rag_pipeline()
+        collection_name = f"course_{request.course_id}"
+        raw_results = await rag_pipeline.vector_store.search(
+            query=request.topic,
+            collection_name=collection_name,
+            n_results=max(request.limit * 2, request.limit),
+            where={"course_id": request.course_id},
+        )
+        results = rag_pipeline._format_search_results(raw_results)
+
+        recommendations = []
+        seen_sources = set()
+        for result in results:
+            metadata = result.get("metadata", {})
+            source_title = (
+                metadata.get("source") or metadata.get("filename") or "Dokumen Course"
+            )
+            relevance_score = float(
+                result.get("rerank_score") or result.get("score") or 0
+            )
+
+            if relevance_score < MIN_RELEVANCE_SCORE or source_title in seen_sources:
+                continue
+
+            snippet = (result.get("content") or "").strip().replace("\n", " ")[:240]
+            if not snippet:
+                continue
+
+            page = metadata.get("page")
+            recommendations.append(
+                ReadingRecommendationItem(
+                    source_title=source_title,
+                    snippet=snippet,
+                    rationale=f"Materi ini paling dekat dengan topik '{request.topic}' berdasarkan pencarian di knowledge base course.",
+                    suggested_action=(
+                        f"Baca bagian ini{' di halaman ' + str(page) if page else ''}, lalu ringkas 2 poin penting yang paling relevan dengan topik {request.topic}."
+                    ),
+                    page=page,
+                    relevance_score=relevance_score,
+                )
+            )
+            seen_sources.add(source_title)
+
+            if len(recommendations) >= request.limit:
+                break
+
+        if not recommendations:
+            return build_recommendation_fallback()
+
+        return ReadingRecommendationResponse(
+            success=True, recommendations=recommendations, fallback=None
+        )
+    except Exception:
+        logger.exception("reading_recommendations_failed", topic=request.topic[:100])
+        return ReadingRecommendationResponse(
+            success=False,
+            recommendations=[],
+            fallback=build_recommendation_fallback().fallback,
+            error="Internal error",
+        )
+
+
+@router.post(
     "/chat/personal",
     response_model=PersonalChatResponse,
     tags=["Core-API Integration"],
@@ -102,14 +193,24 @@ async def personal_chat(request: PersonalChatRequest):
     try:
         llm = get_llm_service()
 
-        messages = [
+        messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": PERSONAL_CHAT_SYSTEM_PROMPT},
         ]
 
         for msg in request.history[-20:]:
-            messages.append({"role": msg.role, "content": msg.content})
+            messages.append(
+                cast(
+                    ChatCompletionMessageParam,
+                    cast(Any, {"role": msg.role, "content": msg.content}),
+                )
+            )
 
-        messages.append({"role": "user", "content": request.message})
+        messages.append(
+            cast(
+                ChatCompletionMessageParam,
+                cast(Any, {"role": "user", "content": request.message}),
+            )
+        )
 
         response = await llm.client.chat.completions.create(
             model=llm.model,
@@ -118,7 +219,7 @@ async def personal_chat(request: PersonalChatRequest):
             max_tokens=2048,
         )
 
-        reply = response.choices[0].message.content.strip()
+        reply = (response.choices[0].message.content or "").strip()
 
         return PersonalChatResponse(reply=reply, success=True)
 
@@ -139,14 +240,24 @@ async def personal_chat(request: PersonalChatRequest):
 async def personal_chat_stream(request: PersonalChatRequest):
     llm = get_llm_service()
 
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": PERSONAL_CHAT_SYSTEM_PROMPT},
     ]
 
     for msg in request.history[-20:]:
-        messages.append({"role": msg.role, "content": msg.content})
+        messages.append(
+            cast(
+                ChatCompletionMessageParam,
+                cast(Any, {"role": msg.role, "content": msg.content}),
+            )
+        )
 
-    messages.append({"role": "user", "content": request.message})
+    messages.append(
+        cast(
+            ChatCompletionMessageParam,
+            cast(Any, {"role": "user", "content": request.message}),
+        )
+    )
 
     async def event_generator():
         try:

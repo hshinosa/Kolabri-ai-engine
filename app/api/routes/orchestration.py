@@ -28,10 +28,11 @@ async def orchestrated_chat(request: OrchestrationRequest):
             user_id=request.user_id,
             group_id=request.group_id,
             message=request.message,
-            topic=request.topic,
+            topic=request.topic or "General Discussion",
             collection_name=request.collection_name,
             course_id=request.course_id,
             chat_room_id=request.chat_room_id,
+            guardrail_policy=request.guardrail_policy,
         )
 
         return OrchestrationResponse(
@@ -43,6 +44,12 @@ async def orchestrated_chat(request: OrchestrationRequest):
             should_notify_teacher=result.should_notify_teacher,
             quality_score=result.quality_score,
             meta=result.analytics,
+            guardrail_outcome=result.analytics.get("guardrail_outcome")
+            if result.analytics
+            else None,
+            guardrail_reason=result.analytics.get("guardrail_reason")
+            if result.analytics
+            else None,
             error=result.error,
         )
 

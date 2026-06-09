@@ -13,7 +13,11 @@ import math
 from app.core.logging import get_logger
 from app.core.guardrails import get_guardrails, GuardrailAction
 from app.core.config import settings
-from app.core.prompt_templates import SYSTEM_PERSONAL_CHAT, SYSTEM_RAG_NO_CONTEXT, TEMPERATURE
+from app.core.prompt_templates import (
+    SYSTEM_PERSONAL_CHAT,
+    SYSTEM_RAG_NO_CONTEXT,
+    TEMPERATURE,
+)
 from app.services.vector_store import get_vector_store, VectorStoreService
 from app.services.reranker import get_reranker, CrossEncoderReranker
 from app.services.rag_quality import RetrievalQualityControls
@@ -31,6 +35,7 @@ class RAGResult:
     details are logged via ``logger.exception(...)`` and never exposed in this
     field. Route handlers may safely propagate ``error`` to clients.
     """
+
     answer: str
     sources: List[Dict[str, Any]]
     query: str
@@ -49,11 +54,11 @@ class RAGResult:
 class RAGPipeline:
     """
     RAG (Retrieval-Augmented Generation) Pipeline with Policy-Based Optimization.
-    
+
     Implements Policy Agent for retrieval optimization as described in research:
     - FETCH: Perform retrieval when context is needed
     - NO_FETCH: Skip retrieval for efficiency (greetings, follow-ups, simple queries)
-    
+
     Workflow:
     1. Receive user query
     2. Policy decision: FETCH or NO_FETCH
@@ -62,17 +67,30 @@ class RAGPipeline:
     5. Generate response using LLM with context
     6. Return answer with sources and action taken
     """
-    
+
     # Skip retrieval patterns (greetings, acknowledgments, simple queries)
     SKIP_PATTERNS = [
-        "halo", "hai", "hi", "hello", "terima kasih", "thanks", 
-        "ok", "oke", "baik", "siap", "mantap", "good", "nice",
-        "selamat pagi", "selamat siang", "selamat malam"
+        "halo",
+        "hai",
+        "hi",
+        "hello",
+        "terima kasih",
+        "thanks",
+        "ok",
+        "oke",
+        "baik",
+        "siap",
+        "mantap",
+        "good",
+        "nice",
+        "selamat pagi",
+        "selamat siang",
+        "selamat malam",
     ]
-    
+
     # Minimum word count for substantive queries
     MIN_QUERY_WORDS = 3
-    
+
     def __init__(
         self,
         vector_store: Optional[VectorStoreService] = None,
@@ -83,7 +101,7 @@ class RAGPipeline:
     ):
         """
         Initialize RAG pipeline.
-        
+
         Args:
             vector_store: Vector store service instance
             llm_service: LLM service instance
@@ -92,25 +110,30 @@ class RAGPipeline:
         self.vector_store = vector_store or get_vector_store()
         self.llm_service = llm_service or get_llm_service()
         self.guardrails = get_guardrails()
-        self.quality_controls = quality_controls or RetrievalQualityControls.from_settings()
+        self.quality_controls = (
+            quality_controls or RetrievalQualityControls.from_settings()
+        )
         self.reranker = reranker or get_reranker()
         self.efficiency_guard = efficiency_guard or (
             get_efficiency_guard() if settings.ENABLE_EFFICIENCY_GUARD else None
         )
-        
+
         # [OPTIMIZATION] Sequential semantic caching
         self._last_query: Optional[str] = None
         self._last_contexts: List[Dict[str, Any]] = []
         self._semantic_threshold = self.quality_controls.semantic_cache_threshold
         self._grounding_threshold = self.quality_controls.grounding_threshold
-        
-        logger.info("rag_pipeline_initialized", efficiency_enabled=settings.ENABLE_EFFICIENCY_GUARD)
+
+        logger.info(
+            "rag_pipeline_initialized",
+            efficiency_enabled=settings.ENABLE_EFFICIENCY_GUARD,
+        )
 
     async def _is_semantically_identical(self, query: str) -> bool:
         """Check if query is semantically similar to the previous one to reuse context."""
         if not self._last_query or not self._last_contexts:
             return False
-        
+
         try:
             from app.services.embeddings import get_embedding_service
 
@@ -128,49 +151,53 @@ class RAGPipeline:
             return similarity > self._semantic_threshold
         except:
             return False
-    
-    def _should_retrieve(self, query: str, context_history: Optional[List[Dict[str, Any]]] = None) -> bool:
+
+    def _should_retrieve(
+        self, query: str, context_history: Optional[List[Dict[str, Any]]] = None
+    ) -> bool:
         """
         Policy Agent: Decide whether to FETCH or NO_FETCH.
-        
+
         Implements RL-based optimization strategy to reduce token usage and latency.
         Skip retrieval for:
         - Short queries (< MIN_QUERY_WORDS words)
         - Greetings and acknowledgments
         - Follow-up queries when context is already available
-        
+
         Args:
             query: User query string
             context_history: Previous context for follow-up detection
-            
+
         Returns:
             True for FETCH, False for NO_FETCH
         """
         query_lower = query.lower().strip()
-        
+
         # Skip for greetings and simple acknowledgments
         if query_lower in self.SKIP_PATTERNS:
             logger.debug("policy_decision", action="NO_FETCH", reason="skip_pattern")
             return False
-        
+
         # Skip for very short queries
         word_count = len(query.split())
         if word_count < self.MIN_QUERY_WORDS:
             logger.debug("policy_decision", action="NO_FETCH", reason="short_query")
             return False
-        
+
         # Check for greeting patterns at start
         for pattern in self.SKIP_PATTERNS:
             if query_lower.startswith(pattern):
                 # Only skip if query is primarily a greeting
                 if word_count <= 5:
-                    logger.debug("policy_decision", action="NO_FETCH", reason="greeting_prefix")
+                    logger.debug(
+                        "policy_decision", action="NO_FETCH", reason="greeting_prefix"
+                    )
                     return False
-        
+
         # FETCH for substantive queries
         logger.debug("policy_decision", action="FETCH", reason="substantive_query")
         return True
-    
+
     async def query(
         self,
         query: str,
@@ -180,22 +207,23 @@ class RAGPipeline:
         filter_metadata: Optional[Dict[str, Any]] = None,
         fading_level: float = 0.0,
         score_threshold: Optional[float] = None,
+        guardrail_context: Optional[Dict[str, Any]] = None,
     ) -> RAGResult:
         """
         Execute a RAG query with Policy-Based optimization, guardrails, and efficiency caching.
-        
+
         Args:
             query: User question
             collection_name: Optional collection to search
             n_results: Number of documents to retrieve
             chat_history: Optional chat history for context
             filter_metadata: Optional metadata filter for search
-            
+
         Returns:
             RAGResult with answer, sources, and action taken (FETCH/NO_FETCH)
         """
         start_time = datetime.now()
-        
+
         # Build context for caching
         cache_context = {
             "collection_name": collection_name,
@@ -203,27 +231,37 @@ class RAGPipeline:
             "filter_metadata": filter_metadata,
             "score_threshold": score_threshold,
         }
-        
+
         # Define the query execution function
         async def execute_rag_query():
             try:
-                guardrail_result = self.guardrails.check_input(query)
+                guardrail_result = self.guardrails.check_input(query, guardrail_context)
                 from app.core.guardrail_diagnostics import log_guardrail_decision
-                log_guardrail_decision(guardrail_result, surface="input", route="rag.execute_query")
+
+                log_guardrail_decision(
+                    guardrail_result, surface="input", route="rag.execute_query"
+                )
 
                 if guardrail_result.action == GuardrailAction.BLOCK:
-                    processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                    
+                    processing_time = (
+                        datetime.now() - start_time
+                    ).total_seconds() * 1000
+
                     logger.warning(
                         "rag_query_blocked",
                         reason=guardrail_result.reason,
-                        query=query[:50]
+                        query=query[:50],
                     )
-                    
+
                     triggered = guardrail_result.triggered_rules or []
-                    rule_id = triggered[0] if triggered else (guardrail_result.reason or "guarded")
+                    rule_id = (
+                        triggered[0]
+                        if triggered
+                        else (guardrail_result.reason or "guarded")
+                    )
                     return RAGResult(
-                        answer=guardrail_result.message or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
+                        answer=guardrail_result.message
+                        or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
                         sources=[],
                         query=query,
                         tokens_used=0,
@@ -233,29 +271,31 @@ class RAGPipeline:
                         outcome="guarded",
                         reason=rule_id,
                     )
-                
+
                 # Use sanitized input if available
                 safe_query = guardrail_result.sanitized_input or query
-                
+
                 # Step 1: Policy decision - FETCH or NO_FETCH
                 should_fetch = self._should_retrieve(safe_query, self._last_contexts)
                 action_taken = "FETCH" if should_fetch else "NO_FETCH"
-                
+
                 if not should_fetch:
                     logger.info(
                         "rag_policy_no_fetch",
                         query=safe_query[:100],
-                        reason="policy_optimization"
+                        reason="policy_optimization",
                     )
-                    
+
                     llm_response = await self.llm_service.generate(
                         prompt=query,
                         system_prompt=SYSTEM_PERSONAL_CHAT,
-                        temperature=TEMPERATURE["personal_chat"]
+                        temperature=TEMPERATURE["personal_chat"],
                     )
-                    
-                    processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                    
+
+                    processing_time = (
+                        datetime.now() - start_time
+                    ).total_seconds() * 1000
+
                     return RAGResult(
                         answer=llm_response.content,
                         sources=[],
@@ -263,24 +303,25 @@ class RAGPipeline:
                         tokens_used=llm_response.tokens_used,
                         success=llm_response.success,
                         error=llm_response.error,
-                        processing_time_ms=processing_time
+                        processing_time_ms=processing_time,
                     )
-                
+
                 # Step 1: FETCH - Search vector store (with semantic cache optimization)
                 logger.info(
                     "rag_search_started",
                     query=query[:100],
                     collection=collection_name,
-                    action=action_taken
+                    action=action_taken,
                 )
-                
+
                 # [OPTIMIZATION] Check if we can reuse previous context
                 if await self._is_semantically_identical(query):
                     logger.info("rag_semantic_cache_hit", query=query[:50])
                     contexts = self._last_contexts
-                    search_results = [] # Placeholder since we have contexts
+                    search_results = []  # Placeholder since we have contexts
                 else:
                     from app.services.rag_retrieval_plan import build_retrieval_plan
+
                     plan = build_retrieval_plan(
                         query=query,
                         query_type=None,
@@ -296,18 +337,20 @@ class RAGPipeline:
                         where=filter_metadata,
                         score_threshold=plan.score_threshold,
                     )
-                    
+
                     if not search_results:
                         logger.warning("rag_no_results", query=query[:100])
-                        
+
                         llm_response = await self.llm_service.generate(
                             prompt=query,
                             system_prompt=SYSTEM_RAG_NO_CONTEXT,
-                            temperature=TEMPERATURE["rag_no_context"]
+                            temperature=TEMPERATURE["rag_no_context"],
                         )
-                        
-                        processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                        
+
+                        processing_time = (
+                            datetime.now() - start_time
+                        ).total_seconds() * 1000
+
                         return RAGResult(
                             answer=llm_response.content,
                             sources=[],
@@ -315,9 +358,9 @@ class RAGPipeline:
                             tokens_used=llm_response.tokens_used,
                             success=llm_response.success,
                             error=llm_response.error,
-                            processing_time_ms=processing_time
+                            processing_time_ms=processing_time,
                         )
-                    
+
                     if plan.use_reranker and self.reranker and self.reranker.enabled:
                         try:
                             reranked_results = await self.reranker.rerank(
@@ -330,89 +373,111 @@ class RAGPipeline:
                         except Exception:
                             logger.exception("rag_rerank_fallback")
 
-                    search_results = search_results[: (n_results or self.quality_controls.top_k_results)]
+                    search_results = search_results[
+                        : (n_results or self.quality_controls.top_k_results)
+                    ]
 
                     # Step 2: Format contexts & Update semantic cache
                     contexts = self._format_search_results(search_results)
                     self._last_query = query
                     self._last_contexts = contexts
-                
+
                 # Step 3: Generate response with RAG
                 llm_response = await self.llm_service.generate_rag_response(
                     query=query,
                     contexts=contexts,
                     chat_history=chat_history,
-                    fading_level=fading_level
+                    fading_level=fading_level,
                 )
-                
+
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
                 from app.services.grounding_verifier import get_grounding_verifier
+
                 grounding_verifier = get_grounding_verifier()
                 grounding_result = await grounding_verifier.verify_grounding_async(
                     response=llm_response.content,
-                    documents=[{"content": c.get("text", c.get("content", ""))} for c in contexts],
-                    threshold=self._grounding_threshold
+                    documents=[
+                        {"content": c.get("text", c.get("content", ""))}
+                        for c in contexts
+                    ],
+                    threshold=self._grounding_threshold,
                 )
 
                 if not grounding_result.is_grounded:
                     logger.warning(
                         "grounding_check_failed",
                         ratio=grounding_result.grounding_ratio,
-                        ungrounded=grounding_result.ungrounded_claims[:2]
+                        ungrounded=grounding_result.ungrounded_claims[:2],
                     )
                     return RAGResult(
                         answer="Jawaban tidak dapat diberikan tanpa berspekulasi di luar materi yang tersedia.",
-                        sources=self._extract_sources(search_results) if search_results else [],
+                        sources=self._extract_sources(search_results)
+                        if search_results
+                        else [],
                         query=query,
                         tokens_used=llm_response.tokens_used,
                         success=True,
                         scaffolding_triggered=True,
-                        processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000
+                        processing_time_ms=(datetime.now() - start_time).total_seconds()
+                        * 1000,
                     )
 
                 # Step 4: Output Guardrails (Pedagogy)
                 output_check = self.guardrails.check_output(
                     response=llm_response.content,
                     original_query=query,
-                    contexts=contexts
+                    contexts=contexts,
+                    context=guardrail_context,
                 )
-                log_guardrail_decision(output_check, surface="output", route="rag.execute_query")
-                
+                log_guardrail_decision(
+                    output_check, surface="output", route="rag.execute_query"
+                )
+
                 scaffolding_triggered = False
                 if output_check.action == GuardrailAction.BLOCK:
                     triggered = output_check.triggered_rules or []
-                    rule_id = triggered[0] if triggered else (output_check.reason or "guarded")
+                    rule_id = (
+                        triggered[0]
+                        if triggered
+                        else (output_check.reason or "guarded")
+                    )
                     return RAGResult(
-                        answer=output_check.message,
+                        answer=output_check.message
+                        or "Maaf, respons dibatasi oleh kebijakan AI course ini.",
                         sources=[],
                         query=query,
                         tokens_used=llm_response.tokens_used,
                         success=True,
                         scaffolding_triggered=True,
-                        processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                        processing_time_ms=(datetime.now() - start_time).total_seconds()
+                        * 1000,
                         outcome="guarded",
                         reason=rule_id,
                     )
                 elif output_check.action == GuardrailAction.REDIRECT:
                     # Reframe to Socratic
-                    reframed = await self.llm_service.reframe_to_socratic(llm_response.content)
+                    reframed = await self.llm_service.reframe_to_socratic(
+                        llm_response.content
+                    )
                     llm_response.content = reframed
                     scaffolding_triggered = True
                 elif output_check.action == GuardrailAction.SANITIZE:
-                    llm_response.content = output_check.sanitized_input
+                    llm_response.content = (
+                        output_check.sanitized_input or llm_response.content or ""
+                    )
 
                 # Step 5: Extract sources
                 sources = self._extract_sources(search_results)
-                
+
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                
+
                 logger.info(
                     "rag_query_complete",
                     query=query[:100],
                     num_sources=len(sources),
-                    processing_time_ms=processing_time
+                    processing_time_ms=processing_time,
                 )
-                
+
                 return RAGResult(
                     answer=llm_response.content,
                     sources=sources,
@@ -421,16 +486,13 @@ class RAGPipeline:
                     success=llm_response.success,
                     scaffolding_triggered=scaffolding_triggered,
                     error=llm_response.error,
-                    processing_time_ms=processing_time
+                    processing_time_ms=processing_time,
                 )
-                
+
             except Exception:
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
-                logger.exception(
-                    "rag_query_failed",
-                    query=query[:100]
-                )
+                logger.exception("rag_query_failed", query=query[:100])
 
                 return RAGResult(
                     answer="",
@@ -439,9 +501,9 @@ class RAGPipeline:
                     tokens_used=0,
                     success=False,
                     error="Internal error",
-                    processing_time_ms=processing_time
+                    processing_time_ms=processing_time,
                 )
-        
+
         # Use Efficiency Guard if enabled
         if self.efficiency_guard:
             result_dict = await self.efficiency_guard.execute_with_caching(
@@ -449,9 +511,9 @@ class RAGPipeline:
                 query_func=execute_rag_query,
                 context=cache_context,
                 ttl_seconds=settings.CACHE_TTL_SECONDS,
-                use_deduplication=True
+                use_deduplication=True,
             )
-            
+
             # Convert dict back to RAGResult if needed
             if isinstance(result_dict, dict):
                 return RAGResult(**result_dict)
@@ -459,98 +521,96 @@ class RAGPipeline:
         else:
             # Execute without caching
             return await execute_rag_query()
-    
+
     async def query_with_course_context(
         self,
         query: str,
         course_id: str,
         chat_room_id: Optional[str] = None,
-        n_results: int = 5
+        n_results: int = 5,
     ) -> RAGResult:
         """
         Query with course-specific context.
-        
+
         Args:
             query: User question
             course_id: Course ID to filter documents
             chat_room_id: Optional chat room ID for additional context
             n_results: Number of results to retrieve
-            
+
         Returns:
             RAGResult with course-specific answer
         """
         # Build metadata filter for course
         filter_metadata = {"course_id": course_id}
-        
+
         # Use course-specific collection or default
         collection_name = f"course_{course_id}"
-        
+
         return await self.query(
             query=query,
             collection_name=collection_name,
             n_results=n_results,
-            filter_metadata=filter_metadata
+            filter_metadata=filter_metadata,
         )
-    
+
     async def get_similar_questions(
-        self,
-        query: str,
-        collection_name: Optional[str] = None,
-        n_results: int = 3
+        self, query: str, collection_name: Optional[str] = None, n_results: int = 3
     ) -> List[Dict[str, Any]]:
         """
         Find similar previously asked questions.
-        
+
         Args:
             query: Current question
             collection_name: Collection to search
             n_results: Number of similar questions to return
-            
+
         Returns:
             List of similar questions with their answers
         """
         try:
             # Search in Q&A collection
             qa_collection = collection_name or "qa_history"
-            
+
             results = await self.vector_store.search(
                 query=query,
                 collection_name=qa_collection,
                 n_results=n_results,
-                where={"type": "question"}
+                where={"type": "question"},
             )
-            
+
             similar = []
             for result in results:
-                similar.append({
-                    "question": result.get("content", ""),
-                    "answer": result.get("metadata", {}).get("answer", ""),
-                    "similarity": result.get("score", 0)
-                })
-            
+                similar.append(
+                    {
+                        "question": result.get("content", ""),
+                        "answer": result.get("metadata", {}).get("answer", ""),
+                        "similarity": result.get("score", 0),
+                    }
+                )
+
             return similar
-            
+
         except Exception:
-            logger.exception(
-                "similar_questions_failed"
-            )
+            logger.exception("similar_questions_failed")
             return []
-    
+
     def _format_search_results(
-        self,
-        results: List[Dict[str, Any]]
+        self, results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Format search results for LLM context."""
         contexts = []
-        
+
         for result in results:
-            contexts.append({
-                "content": result.get("content", result.get("text", "")),
-                "metadata": result.get("metadata", {}),
-                "score": result.get("score", 0),
-                "rerank_score": result.get("rerank_score"),
-            })
-        
+            contexts.append(
+                {
+                    "content": result.get("content", result.get("text", "")),
+                    "metadata": result.get("metadata", {}),
+                    "score": result.get("score", 0),
+                    "rerank_score": result.get("rerank_score"),
+                }
+            )
+
         # Preserve reranker ordering when available, otherwise sort by retrieval score.
         contexts.sort(
             key=lambda x: (
@@ -559,7 +619,7 @@ class RAGPipeline:
             ),
             reverse=True,
         )
-        
+
         return contexts
 
     def _build_multi_source_context(self, docs: List[Dict[str, Any]]) -> str:
@@ -576,7 +636,9 @@ class RAGPipeline:
             parts.append(f"{header}\n{content}")
         return "\n\n---\n\n".join(parts)
 
-    def _build_rag_token_prompt(self, query: str, context_docs: List[Dict[str, Any]]) -> str:
+    def _build_rag_token_prompt(
+        self, query: str, context_docs: List[Dict[str, Any]]
+    ) -> str:
         """Build a prompt that instructs the LLM to synthesize across multiple sources."""
         context = self._build_multi_source_context(context_docs)
         return f"""Kamu adalah asisten pembelajaran yang membantu mahasiswa memahami materi.
@@ -595,29 +657,28 @@ PERTANYAAN MAHASISWA:
 {query}
 
 JAWABAN (sintesis dari semua sumber yang relevan):"""
-    
-    def _extract_sources(
-        self,
-        results: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+
+    def _extract_sources(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extract source information from search results."""
         sources = []
         seen_sources = set()
-        
+
         for result in results:
             metadata = result.get("metadata", {})
             source = metadata.get("source", "Unknown")
-            
+
             # Deduplicate sources
             if source not in seen_sources:
                 seen_sources.add(source)
-                sources.append({
-                    "source": source,
-                    "page": metadata.get("page"),
-                    "chunk_index": metadata.get("chunk_index"),
-                    "relevance_score": result.get("score", 0)
-                })
-        
+                sources.append(
+                    {
+                        "source": source,
+                        "page": metadata.get("page"),
+                        "chunk_index": metadata.get("chunk_index"),
+                        "relevance_score": result.get("score", 0),
+                    }
+                )
+
         return sources
 
 

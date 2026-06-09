@@ -128,6 +128,7 @@ class AskRequest(BaseModel):
     course_id: str = Field(..., min_length=1, max_length=64)
     user_name: Optional[str] = Field(None, max_length=100)
     chat_space_id: Optional[str] = Field(None, max_length=64)
+    guardrail_policy: Optional[dict[str, Any]] = None
 
     @field_validator("course_id", "chat_space_id")
     @classmethod
@@ -142,6 +143,42 @@ class AskResponse(BaseModel):
 
     answer: str
     success: bool = True
+    error: Optional[str] = None
+
+
+class ReadingRecommendationRequest(BaseModel):
+    """Request for structured reading recommendations."""
+
+    topic: str = Field(..., min_length=1, max_length=200)
+    course_id: str = Field(..., min_length=1, max_length=64)
+    limit: int = Field(default=3, ge=1, le=5)
+
+    @field_validator("course_id")
+    @classmethod
+    def validate_course_id_no_path_traversal(cls, v: str) -> str:
+        if any(char in v for char in ["..", "/", "\\"]):
+            raise ValueError("ID tidak boleh mengandung karakter path traversal")
+        return v
+
+
+class ReadingRecommendationItem(BaseModel):
+    source_title: str
+    snippet: str
+    rationale: str
+    suggested_action: str
+    page: Optional[int] = None
+    relevance_score: float = 0
+
+
+class ReadingRecommendationFallback(BaseModel):
+    message: str
+    suggestedNextStep: str
+
+
+class ReadingRecommendationResponse(BaseModel):
+    success: bool
+    recommendations: List[ReadingRecommendationItem] = []
+    fallback: Optional[ReadingRecommendationFallback] = None
     error: Optional[str] = None
 
 
@@ -288,6 +325,7 @@ class OrchestrationRequest(BaseModel):
     collection_name: Optional[str] = Field(None, max_length=100)
     course_id: Optional[str] = Field(None, max_length=64)
     chat_room_id: Optional[str] = Field(None, max_length=64)
+    guardrail_policy: Optional[dict[str, Any]] = None
 
     @field_validator(
         "user_id", "group_id", "course_id", "chat_room_id", "collection_name"
@@ -310,6 +348,8 @@ class OrchestrationResponse(BaseModel):
     should_notify_teacher: bool = False
     quality_score: Optional[float] = None
     meta: Dict[str, Any] = {}
+    guardrail_outcome: Optional[str] = None
+    guardrail_reason: Optional[str] = None
     error: Optional[str] = None
 
 
