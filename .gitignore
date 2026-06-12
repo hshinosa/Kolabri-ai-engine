@@ -29,3 +29,12 @@ out_*.txt
 data/
 docs
 Materi UX.zip
+
+# Production environment
+.env.production
+
+# Load test results
+tests/load/results/
+
+# Probe/debug files
+tests/test_unit/_probe_*.py
