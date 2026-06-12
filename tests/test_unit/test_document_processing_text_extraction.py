@@ -14,6 +14,8 @@ def _patch_pil_image():
 
 def _get_image():
     return sys.modules.get("PIL.Image")
+
+
 from app.services.document_processing.text_extraction import (
     process_pdf,
     process_docx,
@@ -58,6 +60,7 @@ def _large_png_bytes():
 
 def _fake_create_chunks(text, **kwargs):
     from app.services.document_processing.chunking import ChunkSpec
+
     return [ChunkSpec(text=text[:100], metadata={}, chunk_id="c1")]
 
 
@@ -93,7 +96,9 @@ class TestProcessPdf:
     @pytest.mark.asyncio
     async def test_with_image_processing(self):
         page = _make_mock_page(text="Short", images=[(42,)])
-        page.get_text.return_value = "Some page text that is long enough to skip ocr threshold limit."
+        page.get_text.return_value = (
+            "Some page text that is long enough to skip ocr threshold limit."
+        )
         doc = _make_mock_pdf_doc([page])
         doc.extract_image.return_value = {"image": _large_png_bytes()}
         mock_fitz = MagicMock()
@@ -117,6 +122,91 @@ class TestProcessPdf:
 
         assert result.success is True
         assert result.image_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_ocr_fallback_appends_when_page_text_short(self):
+        page = _make_mock_page(text="hi")
+        doc = _make_mock_pdf_doc([page])
+        mock_fitz = MagicMock()
+        mock_fitz.open.return_value = doc
+        ocr_fn = AsyncMock(return_value="scanned words from page")
+
+        result = await process_pdf(
+            content=b"pdf",
+            filename="test.pdf",
+            document_id="d1",
+            metadata={},
+            ocr_available=True,
+            vision_available=False,
+            min_text_length_for_ocr=20,
+            max_images_per_page=3,
+            chunk_size=1000,
+            chunk_overlap=200,
+            ocr_fn=ocr_fn,
+            caption_fn=AsyncMock(return_value=""),
+            _fitz=mock_fitz,
+        )
+
+        ocr_fn.assert_awaited_once()
+        assert result.success is True
+        combined = " ".join(c.text for c in result.chunks)
+        assert "[OCR]" in combined or "scanned" in combined
+
+    @pytest.mark.asyncio
+    async def test_ocr_empty_does_not_append_ocr_block(self):
+        page = _make_mock_page(text="x")
+        doc = _make_mock_pdf_doc([page])
+        mock_fitz = MagicMock()
+        mock_fitz.open.return_value = doc
+
+        result = await process_pdf(
+            content=b"pdf",
+            filename="test.pdf",
+            document_id="d1",
+            metadata={},
+            ocr_available=True,
+            vision_available=False,
+            min_text_length_for_ocr=20,
+            max_images_per_page=3,
+            chunk_size=1000,
+            chunk_overlap=200,
+            ocr_fn=AsyncMock(return_value=""),
+            caption_fn=AsyncMock(return_value=""),
+            _fitz=mock_fitz,
+        )
+
+        assert result.success is True
+        assert "[OCR]" not in " ".join(c.text for c in result.chunks)
+
+    @pytest.mark.asyncio
+    async def test_caption_callback_empty_skips_image_caption(self):
+        page = _make_mock_page(
+            text="Enough native text here to avoid OCR path entirely for this page."
+        )
+        doc = _make_mock_pdf_doc([page])
+        doc.extract_image.return_value = {"image": _large_png_bytes()}
+        mock_fitz = MagicMock()
+        mock_fitz.open.return_value = doc
+        caption_fn = AsyncMock(return_value="")
+
+        result = await process_pdf(
+            content=b"pdf",
+            filename="test.pdf",
+            document_id="d1",
+            metadata={},
+            ocr_available=False,
+            vision_available=True,
+            min_text_length_for_ocr=20,
+            max_images_per_page=3,
+            chunk_size=1000,
+            chunk_overlap=200,
+            ocr_fn=AsyncMock(return_value=""),
+            caption_fn=caption_fn,
+            _fitz=mock_fitz,
+        )
+
+        assert result.success is True
+        assert "[Image]" not in " ".join(c.text for c in result.chunks)
 
     @pytest.mark.asyncio
     async def test_empty_content(self):

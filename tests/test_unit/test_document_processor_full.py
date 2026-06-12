@@ -1948,8 +1948,8 @@ class TestInitializeOcrEngine:
         with (
             patch("app.services.document_processor.OCR_AVAILABLE", True),
             patch(
-                "app.services.document_processor.PaddleOCR",
-                side_effect=RuntimeError("fail"),
+                "app.services.document_processing.image_extraction.initialize_ocr_engine",
+                return_value=None,
             ),
         ):
             proc._initialize_ocr_engine()
@@ -2094,10 +2094,9 @@ class TestSingleton:
             patch("app.services.document_processor.OCR_AVAILABLE", False),
             patch("app.services.document_processor.VISION_AVAILABLE", False),
         ):
-            p = get_document_processor()
-            assert isinstance(p, DocumentProcessor)
-            # Second call returns same instance
-            p2 = get_document_processor()
+            p = mod.get_document_processor()
+            assert isinstance(p, mod.DocumentProcessor)
+            p2 = mod.get_document_processor()
             assert p is p2
         mod._document_processor = None  # cleanup
 

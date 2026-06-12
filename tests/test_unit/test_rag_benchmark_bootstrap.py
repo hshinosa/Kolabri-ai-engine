@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.api.schemas import AskRequest, QueryRequest
 from app.services.rag_benchmark_bootstrap import (
     BenchmarkDatasetBootstrap,
@@ -54,7 +56,9 @@ def test_normalize_public_case_preserves_provenance_and_role():
     assert case.source_dataset == "indoqa"
     assert case.benchmark_role == "indonesian_qa_baseline"
     assert case.expected_answer == "Machine learning adalah cabang AI."
-    assert case.contexts == ["Machine learning adalah cabang AI yang belajar dari data."]
+    assert case.contexts == [
+        "Machine learning adalah cabang AI yang belajar dari data."
+    ]
 
 
 def test_internal_placeholder_template_declares_future_kolabri_dataset_shape():
@@ -67,6 +71,11 @@ def test_internal_placeholder_template_declares_future_kolabri_dataset_shape():
     assert "expected_answer" in template
     assert "contexts" in template
     assert "expected_sources" in template
+
+
+def test_get_public_source_unknown_raises():
+    with pytest.raises(ValueError, match="Unknown benchmark"):
+        BenchmarkDatasetBootstrap.get_public_source("not-a-real-source")
 
 
 def test_backend_only_workflow_defers_public_execution_surfaces():

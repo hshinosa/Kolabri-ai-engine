@@ -365,6 +365,20 @@ class TestGoalValidator:
         assert "success" in result
 
 
+    @pytest.mark.asyncio
+    async def test_refine_goal_plain_json_without_markdown_fence(self, validator):
+        import json
+
+        body = json.dumps({"refined_goal": "Menyelesaikan 4 tugas dalam 2 minggu"})
+        mock_llm = MagicMock()
+        mock_llm.generate = AsyncMock(
+            return_value=MagicMock(tokens_used=2, content=body)
+        )
+        with patch("app.services.llm.get_llm_service", return_value=mock_llm):
+            result = await validator.refine_goal("Belajar rutin", ["measurable"])
+        assert result["success"] is True
+
+
 class TestGetGoalValidator:
     """Test get_goal_validator singleton."""
     

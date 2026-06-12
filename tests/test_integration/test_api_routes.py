@@ -95,6 +95,18 @@ def _make_rag_result(answer="Test RAG response", sources=None, success=True):
     )
 
 
+def _mock_redis_cache_miss():
+    """Patch get_redis_cache so dashboard routes can await get/set without real Redis."""
+    mock_redis_instance = MagicMock()
+    mock_redis_instance.generate_key = MagicMock(return_value="test-cache-key")
+    mock_redis_instance.get = AsyncMock(return_value=None)
+    mock_redis_instance.set = AsyncMock()
+    return patch(
+        "app.api.routes.analytics.get_redis_cache",
+        new=AsyncMock(return_value=mock_redis_instance),
+    )
+
+
 def _make_processed_document(filename="test.pdf", chunks_count=3):
     """Helper to create a real ProcessedDocument object."""
     from app.services.document_processor import ProcessedDocument, ProcessedChunk
@@ -459,37 +471,38 @@ def test_validate_goal_invalid(mock_get_orchestrator, client):
 @patch("app.api.routes.analytics.get_orchestrator")
 def test_group_dashboard_success(mock_get_orchestrator, client):
     """Test /analytics/dashboard/group/{id} returns full dashboard data."""
-    mock_orchestrator = MagicMock()
-    mock_orchestrator.get_group_dashboard_data = AsyncMock(
-        return_value={
-            "context": "group",
-            "group_id": "group_1",
-            "status_color": "green",
-            "session_id": "1",
-            "radar_chart_data": {
-                "cognitive": 7.0,
-                "collaboration": 8.0,
-                "consistency": 6.0,
-                "vocabulary": 7.5,
-                "engagement": 8.0,
-            },
-            "teacher_advice": ["Kelompok berjalan stabil."],
-            "metrics": {
-                "quality_score": 75.0,
-                "hot_percentage": 40.0,
-            },
-        }
-    )
-    mock_get_orchestrator.return_value = mock_orchestrator
+    with _mock_redis_cache_miss():
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.get_group_dashboard_data = AsyncMock(
+            return_value={
+                "context": "group",
+                "group_id": "group_1",
+                "status_color": "green",
+                "session_id": "1",
+                "radar_chart_data": {
+                    "cognitive": 7.0,
+                    "collaboration": 8.0,
+                    "consistency": 6.0,
+                    "vocabulary": 7.5,
+                    "engagement": 8.0,
+                },
+                "teacher_advice": ["Kelompok berjalan stabil."],
+                "metrics": {
+                    "quality_score": 75.0,
+                    "hot_percentage": 40.0,
+                },
+            }
+        )
+        mock_get_orchestrator.return_value = mock_orchestrator
 
-    response = client.get("/api/analytics/dashboard/group/group_1")
+        response = client.get("/api/analytics/dashboard/group/group_1")
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["context"] == "group"
-    assert data["status_color"] == "green"
-    assert "radar_chart_data" in data
-    assert data["radar_chart_data"]["cognitive"] == 7.0
+        assert response.status_code == 200
+        data = response.json()
+        assert data["context"] == "group"
+        assert data["status_color"] == "green"
+        assert "radar_chart_data" in data
+        assert data["radar_chart_data"]["cognitive"] == 7.0
 
 
 # ==============================================================================
@@ -500,36 +513,37 @@ def test_group_dashboard_success(mock_get_orchestrator, client):
 @patch("app.api.routes.analytics.get_orchestrator")
 def test_individual_dashboard_success(mock_get_orchestrator, client):
     """Test /analytics/dashboard/individual/{id} returns personal dashboard."""
-    mock_orchestrator = MagicMock()
-    mock_orchestrator.get_individual_dashboard_data = AsyncMock(
-        return_value={
-            "context": "individual",
-            "user_id": "user_1",
-            "status_color": "yellow",
-            "radar_chart_data": {
-                "critical_thinking": 6.0,
-                "engagement": 5.0,
-                "vocabulary": 7.0,
-                "quality": 6.5,
-                "consistency": 8.0,
-            },
-            "personal_metrics": {
-                "avg_quality_score": 65.0,
-                "hot_percentage": 25.0,
-            },
-            "total_messages": 10,
-        }
-    )
-    mock_get_orchestrator.return_value = mock_orchestrator
+    with _mock_redis_cache_miss():
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.get_individual_dashboard_data = AsyncMock(
+            return_value={
+                "context": "individual",
+                "user_id": "user_1",
+                "status_color": "yellow",
+                "radar_chart_data": {
+                    "critical_thinking": 6.0,
+                    "engagement": 5.0,
+                    "vocabulary": 7.0,
+                    "quality": 6.5,
+                    "consistency": 8.0,
+                },
+                "personal_metrics": {
+                    "avg_quality_score": 65.0,
+                    "hot_percentage": 25.0,
+                },
+                "total_messages": 10,
+            }
+        )
+        mock_get_orchestrator.return_value = mock_orchestrator
 
-    response = client.get("/api/analytics/dashboard/individual/user_1")
+        response = client.get("/api/analytics/dashboard/individual/user_1")
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["context"] == "individual"
-    assert "radar_chart_data" in data
-    assert data["radar_chart_data"]["critical_thinking"] == 6.0
-    assert data["total_messages"] == 10
+        assert response.status_code == 200
+        data = response.json()
+        assert data["context"] == "individual"
+        assert "radar_chart_data" in data
+        assert data["radar_chart_data"]["critical_thinking"] == 6.0
+        assert data["total_messages"] == 10
 
 
 # ==============================================================================

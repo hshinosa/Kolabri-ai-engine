@@ -27,6 +27,7 @@ sys.modules["pptx"] = MagicMock()
 sys.modules["openpyxl"] = MagicMock()
 sys.modules["pandas"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
+sys.modules["numpy"].bool_ = bool
 _pil_mock = MagicMock()
 
 

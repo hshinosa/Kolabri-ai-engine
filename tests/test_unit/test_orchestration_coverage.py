@@ -1,5 +1,6 @@
 import importlib
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -252,6 +253,33 @@ async def test_handle_message_anomaly_low_severity_does_not_notify(orchestrator_
 
 
 @pytest.mark.asyncio
+async def test_handle_message_anomaly_detector_returns_no_anomalies(
+    orchestrator_factory, patched_settings
+):
+    patched_settings.INTERVENTION_MIN_MESSAGES = 1
+    orchestrator, mocks = orchestrator_factory()
+    mocks["anomaly"].detect_session_anomalies.return_value = MagicMock(
+        has_anomalies=False,
+        description="",
+        anomaly_type="",
+        severity="low",
+        timestamp=datetime(2024, 1, 1, 8, 0, 0),
+    )
+    with patch.object(orchestrator, "_should_intervene", new=AsyncMock(return_value=(False, None))):
+        result = await orchestrator.handle_message(
+            user_id="user-4",
+            group_id="group-no-anom",
+            message="Pesan biasa",
+            chat_room_id="room_100",
+        )
+    assert result.success is True
+    mocks["anomaly"].detect_session_anomalies.assert_awaited()
+    for call in mocks["mongo"].log_activity.await_args_list:
+        if call[0][0].get("Activity") == "Anomaly_Detected":
+            pytest.fail("unexpected Anomaly_Detected log")
+
+
+@pytest.mark.asyncio
 async def test_handle_message_returns_error_result_on_exception(orchestrator_factory):
     orchestrator, mocks = orchestrator_factory()
     mocks["analyzer"].analyze_interaction.side_effect = RuntimeError("boom")
@@ -325,6 +353,28 @@ async def test_get_group_dashboard_data_ignores_anomaly_detector_failure(orchest
 
     assert result["anomalies"] == []
     assert result["status_color"] == "green"
+
+
+@pytest.mark.asyncio
+async def test_get_group_dashboard_data_anomaly_detector_no_anomalies(
+    orchestrator_factory,
+):
+    orchestrator, mocks = orchestrator_factory()
+    mocks["mongo"].get_activity_logs = AsyncMock(
+        return_value=[
+            {
+                "Attributes": {"original_text": "hi"},
+                "Resource": "u1",
+                "Timestamp": datetime(2024, 1, 1, 9, 0, 0),
+            }
+        ]
+    )
+    mocks["analyzer"].analyze_interaction = MagicMock(return_value=make_analysis())
+    mocks["anomaly"].detect_session_anomalies = AsyncMock(
+        return_value=MagicMock(has_anomalies=False)
+    )
+    result = await orchestrator.get_group_dashboard_data("g-clean")
+    assert result.get("anomalies") == []
 
 
 @pytest.mark.asyncio
@@ -439,6 +489,21 @@ async def test_should_intervene_respects_cooldown(orchestrator_factory):
     )
 
     assert (needed, reason) == (False, None)
+
+
+@pytest.mark.asyncio
+async def test_should_intervene_after_cooldown_expired_checks_metrics(
+    orchestrator_factory, patched_settings
+):
+    patched_settings.INTERVENTION_COOLDOWN_MINUTES = 5
+    orchestrator, _ = orchestrator_factory()
+    orchestrator._last_intervention["group-expired"] = datetime.now() - timedelta(
+        minutes=30
+    )
+    needed, reason = await orchestrator._should_intervene(
+        "group-expired", make_analysis(lexical_variety=0.1), 50
+    )
+    assert (needed, reason) == (True, "low_lexical")
 
 
 @pytest.mark.asyncio

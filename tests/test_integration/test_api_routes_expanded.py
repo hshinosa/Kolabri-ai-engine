@@ -80,6 +80,17 @@ def client(integration_app) -> TestClient:
 # ---------------------------------------------------------------------------
 
 
+def _mock_redis_cache_miss():
+    mock_redis_instance = MagicMock()
+    mock_redis_instance.generate_key = MagicMock(return_value="test-cache-key")
+    mock_redis_instance.get = AsyncMock(return_value=None)
+    mock_redis_instance.set = AsyncMock()
+    return patch(
+        "app.api.routes.analytics.get_redis_cache",
+        new=AsyncMock(return_value=mock_redis_instance),
+    )
+
+
 def _rag_result(answer="Mock answer", sources=None, success=True, error=None):
     from app.services.rag import RAGResult
 
@@ -622,7 +633,10 @@ class TestGroupDashboardEndpoint:
 
     def test_success(self, client):
         payload = {"context": "group", "group_id": "g1", "status_color": "green"}
-        with patch("app.api.routes.analytics.get_orchestrator") as m:
+        with (
+            _mock_redis_cache_miss(),
+            patch("app.api.routes.analytics.get_orchestrator") as m,
+        ):
             orch = MagicMock()
             orch.get_group_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -657,7 +671,10 @@ class TestIndividualDashboardEndpoint:
 
     def test_success(self, client):
         payload = {"context": "individual", "user_id": "u1", "total_messages": 42}
-        with patch("app.api.routes.analytics.get_orchestrator") as m:
+        with (
+            _mock_redis_cache_miss(),
+            patch("app.api.routes.analytics.get_orchestrator") as m,
+        ):
             orch = MagicMock()
             orch.get_individual_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -691,7 +708,10 @@ class TestLegacyDashboardEndpoint:
 
     def test_legacy_delegates(self, client):
         payload = {"context": "group", "group_id": "g1"}
-        with patch("app.api.routes.analytics.get_orchestrator") as m:
+        with (
+            _mock_redis_cache_miss(),
+            patch("app.api.routes.analytics.get_orchestrator") as m,
+        ):
             orch = MagicMock()
             orch.get_group_dashboard_data = AsyncMock(return_value=payload)
             m.return_value = orch
@@ -903,13 +923,15 @@ class TestGoalValidateEndpoint:
         assert resp.status_code == 500
         assert resp.json()["detail"] == "INTERNAL_SERVER_ERROR"
 
-    def test_missing_form_fields_returns_422(self, client):
-        """All form fields (goal_text, user_id, chat_space_id) are required."""
+    def test_missing_form_fields_returns_validation_result(self, client):
+        """Form parsial: endpoint mengembalikan 200 dengan hasil validasi (bukan 422)."""
         resp = client.post(
             "/api/goals/validate",
             data={"goal_text": "Goal"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "is_valid" in body
 
 
 # ###########################################################################

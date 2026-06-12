@@ -196,6 +196,64 @@ def test_health_check_mongo_and_breaker_failures(mock_vs, mock_reranker):
     assert response.json()["status"] == "degraded"
 
 
+@patch("app.api.routes.health.get_reranker")
+@patch("app.api.routes.health.get_vector_store")
+def test_health_check_redis_ping_failure(mock_vs, mock_reranker):
+    mock_vs_instance = MagicMock()
+    mock_vs_instance._ensure_collection = AsyncMock()
+    mock_vs.return_value = mock_vs_instance
+    mock_reranker_instance = MagicMock()
+    mock_reranker_instance.is_available.return_value = True
+    mock_reranker.return_value = mock_reranker_instance
+
+    with (
+        patch("app.services.llm.get_llm_service") as mock_llm,
+        patch("app.services.mongodb_logger.get_mongo_logger") as mock_mongo,
+        patch("app.core.redis_cache.get_redis_cache") as mock_redis_get,
+        patch("app.services.circuit_breaker.get_llm_circuit_breaker") as mock_cb,
+    ):
+        mock_llm.return_value = MagicMock(model="test-model")
+        mock_mongo.return_value = MagicMock(enabled=False)
+        mock_redis = MagicMock()
+        mock_redis.ping = AsyncMock(side_effect=RuntimeError("redis down"))
+        mock_redis_get.return_value = mock_redis
+        mock_cb.return_value = MagicMock(state=MagicMock(value="closed"))
+
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["dependencies"]["redis"] == "down"
+
+
+@patch("app.api.routes.health.get_reranker")
+@patch("app.api.routes.health.get_vector_store")
+def test_health_check_redis_get_cache_failure(mock_vs, mock_reranker):
+    mock_vs_instance = MagicMock()
+    mock_vs_instance._ensure_collection = AsyncMock()
+    mock_vs.return_value = mock_vs_instance
+    mock_reranker_instance = MagicMock()
+    mock_reranker_instance.is_available.return_value = True
+    mock_reranker.return_value = mock_reranker_instance
+
+    with (
+        patch("app.services.llm.get_llm_service") as mock_llm,
+        patch("app.services.mongodb_logger.get_mongo_logger") as mock_mongo,
+        patch(
+            "app.core.redis_cache.get_redis_cache",
+            side_effect=RuntimeError("redis client init failed"),
+        ),
+        patch("app.services.circuit_breaker.get_llm_circuit_breaker") as mock_cb,
+    ):
+        mock_llm.return_value = MagicMock(model="test-model")
+        mock_mongo.return_value = MagicMock(enabled=False)
+        mock_cb.return_value = MagicMock(state=MagicMock(value="closed"))
+
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["dependencies"]["redis"] == "down"
+
+
 def test_track_activity_without_user_id():
     mock_listener = MagicMock()
     mock_listener.update_last_message_time = AsyncMock()
@@ -271,26 +329,38 @@ def test_analyze_engagement(mock_analyzer):
     assert data["engagement_type"] == "cognitive"
 
 
+@patch("app.api.routes.analytics.get_redis_cache")
 @patch("app.api.routes.analytics.get_orchestrator")
-def test_get_group_dashboard(mock_orchestrator):
+def test_get_group_dashboard(mock_orchestrator, mock_redis):
     mock_orch_instance = MagicMock()
     mock_orch_instance.get_group_dashboard_data = AsyncMock(
         return_value={"group": "data"}
     )
     mock_orchestrator.return_value = mock_orch_instance
+    mock_redis_instance = MagicMock()
+    mock_redis_instance.generate_key = MagicMock(return_value="k")
+    mock_redis_instance.get = AsyncMock(return_value=None)
+    mock_redis_instance.set = AsyncMock()
+    mock_redis.return_value = mock_redis_instance
 
     response = client.get("/analytics/dashboard/group/test-group")
     assert response.status_code == 200
     assert response.json() == {"group": "data"}
 
 
+@patch("app.api.routes.analytics.get_redis_cache")
 @patch("app.api.routes.analytics.get_orchestrator")
-def test_get_individual_dashboard(mock_orchestrator):
+def test_get_individual_dashboard(mock_orchestrator, mock_redis):
     mock_orch_instance = MagicMock()
     mock_orch_instance.get_individual_dashboard_data = AsyncMock(
         return_value={"individual": "data"}
     )
     mock_orchestrator.return_value = mock_orch_instance
+    mock_redis_instance = MagicMock()
+    mock_redis_instance.generate_key = MagicMock(return_value="k")
+    mock_redis_instance.get = AsyncMock(return_value=None)
+    mock_redis_instance.set = AsyncMock()
+    mock_redis.return_value = mock_redis_instance
 
     response = client.get("/analytics/dashboard/individual/test-user")
     assert response.status_code == 200

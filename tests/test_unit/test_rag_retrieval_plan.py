@@ -30,18 +30,24 @@ def test_default_plan_no_query_type(qc):
 
 
 def test_factual_query_tightens_threshold_and_caps_rerank(qc):
-    plan = build_retrieval_plan(query="when?", query_type="factual", quality_controls=qc)
+    plan = build_retrieval_plan(
+        query="when?", query_type="factual", quality_controls=qc
+    )
     assert plan.score_threshold >= qc.similarity_threshold
     assert plan.rerank_top_n <= 3
 
 
 def test_conceptual_query_loosens_threshold(qc):
-    plan = build_retrieval_plan(query="why?", query_type="conceptual", quality_controls=qc)
+    plan = build_retrieval_plan(
+        query="why?", query_type="conceptual", quality_controls=qc
+    )
     assert plan.score_threshold <= qc.similarity_threshold
 
 
 def test_procedural_query_caps_rerank(qc):
-    plan = build_retrieval_plan(query="how to", query_type="procedural", quality_controls=qc)
+    plan = build_retrieval_plan(
+        query="how to", query_type="procedural", quality_controls=qc
+    )
     assert plan.rerank_top_n <= 3
 
 

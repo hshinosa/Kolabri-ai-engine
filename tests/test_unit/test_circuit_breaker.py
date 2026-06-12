@@ -54,9 +54,12 @@ async def test_call_raises_open_error_when_circuit_is_open():
     breaker = CircuitBreaker("svc")
     breaker.state = CircuitState.OPEN
 
-    with patch.object(breaker, "_check_state_transition", new=AsyncMock()), pytest.raises(
-        CircuitBreakerOpenError,
-        match="OPEN",
+    with (
+        patch.object(breaker, "_check_state_transition", new=AsyncMock()),
+        pytest.raises(
+            CircuitBreakerOpenError,
+            match="OPEN",
+        ),
     ):
         await breaker.call(AsyncMock())
 
@@ -90,15 +93,33 @@ async def test_open_stays_open_before_timeout_expires():
 
 
 @pytest.mark.asyncio
+async def test_half_open_increments_call_counter_before_execute():
+    config = CircuitBreakerConfig(half_open_max_calls=2)
+    breaker = CircuitBreaker("svc", config)
+    breaker.state = CircuitState.HALF_OPEN
+    breaker.half_open_calls = 0
+    func = AsyncMock(return_value="ok")
+
+    with patch.object(breaker, "_check_state_transition", new=AsyncMock()):
+        result = await breaker.call(func)
+
+    assert result == "ok"
+    assert breaker.half_open_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_half_open_call_limit_blocks_extra_calls():
     config = CircuitBreakerConfig(half_open_max_calls=1)
     breaker = CircuitBreaker("svc", config)
     breaker.state = CircuitState.HALF_OPEN
     breaker.half_open_calls = 1
 
-    with patch.object(breaker, "_check_state_transition", new=AsyncMock()), pytest.raises(
-        CircuitBreakerOpenError,
-        match="half-open limit reached",
+    with (
+        patch.object(breaker, "_check_state_transition", new=AsyncMock()),
+        pytest.raises(
+            CircuitBreakerOpenError,
+            match="half-open limit reached",
+        ),
     ):
         await breaker.call(AsyncMock())
 
@@ -130,6 +151,24 @@ async def test_success_in_closed_state_resets_failure_count():
 
     assert breaker.failure_count == 0
     assert breaker.state == CircuitState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_record_success_in_open_state_only_resets_failure_count():
+    breaker = CircuitBreaker("svc")
+    breaker.state = CircuitState.OPEN
+    breaker.failure_count = 4
+    await breaker._record_success()
+    assert breaker.state == CircuitState.OPEN
+    assert breaker.failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_record_failure_in_open_state_increments_without_closed_branch():
+    breaker = CircuitBreaker("svc", CircuitBreakerConfig(failure_threshold=2))
+    breaker.state = CircuitState.OPEN
+    await breaker._record_failure()
+    assert breaker.state == CircuitState.OPEN
 
 
 @pytest.mark.asyncio

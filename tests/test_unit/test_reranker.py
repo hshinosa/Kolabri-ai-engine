@@ -22,10 +22,13 @@ def _docs():
 
 
 def test_init_enabled_when_setting_and_library_available():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=2, retrieve_k=5)
 
@@ -36,10 +39,13 @@ def test_init_enabled_when_setting_and_library_available():
 
 
 def test_init_disabled_when_library_missing():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        False,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            False,
+        ),
     ):
         instance = CrossEncoderReranker()
 
@@ -50,25 +56,35 @@ def test_init_disabled_when_library_missing():
 async def test_load_model_lazy_loads_cross_encoder_once():
     mock_model = MagicMock()
 
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
-    ), patch.object(reranker_module, "CrossEncoder", return_value=mock_model, create=True) as cross_encoder:
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
+        patch.object(reranker_module.settings, "RERANK_CACHE_DIR", ""),
+        patch.object(
+            reranker_module, "TextCrossEncoder", return_value=mock_model, create=True
+        ) as text_cross_encoder,
+    ):
         instance = CrossEncoderReranker(model_name="my-model")
         await instance.load_model()
         await instance.load_model()
 
     assert instance.model is mock_model
-    cross_encoder.assert_called_once_with("my-model")
+    text_cross_encoder.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_rerank_returns_original_subset_when_disabled():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", False), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", False),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=2)
 
@@ -80,10 +96,13 @@ async def test_rerank_returns_original_subset_when_disabled():
 
 @pytest.mark.asyncio
 async def test_rerank_disabled_respects_explicit_top_k_override():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", False), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", False),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=3)
 
@@ -94,10 +113,13 @@ async def test_rerank_disabled_respects_explicit_top_k_override():
 
 @pytest.mark.asyncio
 async def test_rerank_returns_empty_list_for_empty_documents():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker()
 
@@ -109,12 +131,15 @@ async def test_rerank_returns_empty_list_for_empty_documents():
 @pytest.mark.asyncio
 async def test_rerank_sorts_by_score_and_adds_metadata():
     mock_model = MagicMock()
-    mock_model.predict.return_value = [0.1, 0.9, 0.5]
+    mock_model.rerank.return_value = [0.1, 0.9, 0.5]
 
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(model_name="ce-model", top_k=2)
         instance.model = mock_model
@@ -132,12 +157,15 @@ async def test_rerank_sorts_by_score_and_adds_metadata():
 @pytest.mark.asyncio
 async def test_rerank_respects_explicit_top_k_override():
     mock_model = MagicMock()
-    mock_model.predict.return_value = [0.1, 0.9, 0.5]
+    mock_model.rerank.return_value = [0.1, 0.9, 0.5]
 
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(model_name="ce-model", top_k=3)
         instance.model = mock_model
@@ -150,12 +178,15 @@ async def test_rerank_respects_explicit_top_k_override():
 @pytest.mark.asyncio
 async def test_rerank_uses_cache_on_second_call():
     mock_model = MagicMock()
-    mock_model.predict.return_value = [0.2, 0.6, 0.4]
+    mock_model.rerank.return_value = [0.2, 0.6, 0.4]
 
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=2)
         instance.model = mock_model
@@ -167,24 +198,29 @@ async def test_rerank_uses_cache_on_second_call():
     assert first == second
     assert instance.cache_hits == 1
     assert instance.total_reranks == 1
-    mock_model.predict.assert_called_once()
+    mock_model.rerank.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_rerank_calls_load_model_when_model_missing():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=1)
         loaded_model = MagicMock()
-        loaded_model.predict.return_value = [0.8, 0.2, 0.1]
+        loaded_model.rerank.return_value = [0.8, 0.2, 0.1]
 
         async def fake_load_model():
             instance.model = loaded_model
 
-        with patch.object(instance, "load_model", new=AsyncMock(side_effect=fake_load_model)) as load_mock:
+        with patch.object(
+            instance, "load_model", new=AsyncMock(side_effect=fake_load_model)
+        ) as load_mock:
             result = await instance.rerank("query", _docs())
 
     load_mock.assert_awaited_once()
@@ -194,12 +230,15 @@ async def test_rerank_calls_load_model_when_model_missing():
 @pytest.mark.asyncio
 async def test_rerank_falls_back_to_original_order_on_exception():
     broken_model = MagicMock()
-    broken_model.predict.side_effect = RuntimeError("predict failed")
+    broken_model.rerank.side_effect = RuntimeError("rerank failed")
 
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker(top_k=2)
         instance.model = broken_model
@@ -212,10 +251,13 @@ async def test_rerank_falls_back_to_original_order_on_exception():
 
 
 def test_get_metrics_reports_cache_rate_and_average_time():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker()
 
@@ -233,10 +275,13 @@ def test_get_metrics_reports_cache_rate_and_average_time():
 
 
 def test_disable_turns_off_reranking():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker()
 
@@ -246,10 +291,13 @@ def test_disable_turns_off_reranking():
 
 
 def test_enable_turns_on_reranking_when_library_available():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", False), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        True,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", False),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            True,
+        ),
     ):
         instance = CrossEncoderReranker()
 
@@ -259,24 +307,30 @@ def test_enable_turns_on_reranking_when_library_available():
 
 
 def test_enable_does_not_turn_on_when_library_missing():
-    with patch.object(reranker_module.settings, "ENABLE_RERANKING", True), patch.object(
-        reranker_module,
-        "CROSS_ENCODER_AVAILABLE",
-        False,
+    with (
+        patch.object(reranker_module.settings, "ENABLE_RERANKING", True),
+        patch.object(
+            reranker_module,
+            "CROSS_ENCODER_AVAILABLE",
+            False,
+        ),
     ):
         instance = CrossEncoderReranker()
+        instance.enable()
 
-    instance.enable()
-
-    assert instance.enabled is False
+        assert instance.enabled is False
 
 
 def test_get_reranker_returns_singleton_with_settings_values():
-    with patch.object(reranker_module.settings, "RERANK_MODEL_NAME", "configured-model"), patch.object(
-        reranker_module.settings,
-        "RERANK_TOP_K",
-        4,
-    ), patch.object(reranker_module.settings, "RERANK_RETRIEVE_K", 11):
+    with (
+        patch.object(reranker_module.settings, "RERANK_MODEL_NAME", "configured-model"),
+        patch.object(
+            reranker_module.settings,
+            "RERANK_TOP_K",
+            4,
+        ),
+        patch.object(reranker_module.settings, "RERANK_RETRIEVE_K", 11),
+    ):
         first = get_reranker()
         second = get_reranker()
 

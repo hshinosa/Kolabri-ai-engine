@@ -80,6 +80,20 @@ class TestMongoDBLoggerFull:
         mongo_logger.enabled = False
         await mongo_logger.log_activity({"CaseID": "test"})
 
+
+    @pytest.mark.asyncio
+    async def test_log_activity_with_bound_request_id(self, mongo_logger):
+        mongo_logger.enabled = True
+        mongo_logger.db = MagicMock()
+        mongo_logger.db.activity_logs.insert_one = AsyncMock()
+        with patch(
+            "app.services.mongodb_logger.structlog.contextvars.get_contextvars",
+            return_value={"request_id": "trace-1"},
+        ):
+            await mongo_logger.log_activity({"CaseID": "c1", "Activity": "Chat"})
+        entry = mongo_logger.db.activity_logs.insert_one.await_args[0][0]
+        assert entry["request_id"] == "trace-1"
+
     @pytest.mark.asyncio
     async def test_log_intervention(self, mongo_logger):
         mongo_logger.log_activity = AsyncMock()

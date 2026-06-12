@@ -76,6 +76,20 @@ def test_create_chunks_metadata_pass_through():
         assert c.metadata["page"] == 2
 
 
+def test_create_chunks_prefers_sentence_boundary_when_splitting():
+    text = "Alpha sentence here. Beta sentence follows. Gamma ends the block."
+    chunks = create_chunks(
+        text=text,
+        document_id="d1",
+        filename="a.pdf",
+        page_number=1,
+        chunk_size=35,
+        chunk_overlap=5,
+    )
+    assert len(chunks) >= 2
+    assert all(c.text.endswith(".") or "sentence" in c.text for c in chunks)
+
+
 def test_create_chunks_handles_zero_overlap_progress():
     chunks = create_chunks(
         text="a" * 250,
@@ -89,3 +103,10 @@ def test_create_chunks_handles_zero_overlap_progress():
     char_ranges = [(c.metadata["char_start"], c.metadata["char_end"]) for c in chunks]
     for i in range(len(char_ranges) - 1):
         assert char_ranges[i + 1][0] >= char_ranges[i][1]
+
+
+def test_create_chunks_advances_past_whitespace_padding_between_segments():
+    text = "segmentone " * 4 + " " * 50 + "segmenttwo " * 4
+    chunks = create_chunks(text, "d1", "f.txt", 1, 32, 8)
+    assert chunks
+    assert all(chunk.text.strip() for chunk in chunks)

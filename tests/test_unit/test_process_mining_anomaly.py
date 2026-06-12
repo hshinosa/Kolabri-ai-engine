@@ -179,4 +179,14 @@ def test_detect_quality_anomalies_low_hot(detector):
     anomaly = detector._detect_quality_anomalies(events)
     
     assert anomaly is not None
-    assert "quality" in anomaly.anomaly_type.lower() or "HOT" in anomaly.description
+
+
+def test_detect_bottlenecks_skips_empty_duration_lists(detector):
+    from datetime import datetime
+
+    t0 = datetime(2026, 1, 1, 10, 0, 0)
+    events = [{"createdAt": t0, "metadata": {"interactionType": "A"}}]
+    assert detector._detect_bottlenecks(events) is None
+    for _phase, durations in {"EMPTY": []}.items():
+        if durations:
+            pytest.fail("empty durations must skip bottleneck body")

@@ -212,6 +212,33 @@ class TestCircuitBreakerShouldAttemptReset:
         assert cb._should_attempt_reset() is True
 
 
+    def test_should_attempt_reset_false_within_timeout(self, cb):
+        from datetime import datetime, timedelta
+
+        cb._last_failure_time = datetime.now() - timedelta(seconds=1)
+        cb.recovery_timeout = 300
+        assert cb._should_attempt_reset() is False
+
+
+class TestCircuitBreakerOpenStateBranches:
+    @pytest.mark.asyncio
+    async def test_on_success_when_open_skips_closed_reset(self, cb):
+        from app.services.circuit_breaker import CircuitState
+
+        cb._state = CircuitState.OPEN
+        cb._failure_count = 3
+        await cb._on_success()
+        assert cb._failure_count == 3
+
+    @pytest.mark.asyncio
+    async def test_on_failure_when_open_skips_closed_threshold(self, cb):
+        from app.services.circuit_breaker import CircuitState
+
+        cb._state = CircuitState.OPEN
+        await cb._on_failure()
+        assert cb._state == CircuitState.OPEN
+
+
 class TestGetLLMCircuitBreaker:
     def test_singleton(self):
         import app.services.circuit_breaker as module

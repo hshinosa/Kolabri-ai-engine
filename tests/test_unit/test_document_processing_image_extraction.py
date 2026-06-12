@@ -240,6 +240,86 @@ class TestInitializeOcrEngine:
             result = initialize_ocr_engine()
         assert result is None
 
+    def test_init_success(self):
+        mock_engine = MagicMock()
+        with (
+            patch(
+                "app.services.document_processing.image_extraction.OCR_AVAILABLE",
+                True,
+            ),
+            patch(
+                "app.services.document_processing.image_extraction.PaddleOCR",
+                return_value=mock_engine,
+            ),
+            patch("app.services.document_processing.image_extraction.settings") as st,
+        ):
+            st.OCR_LANGUAGE = "en"
+            assert initialize_ocr_engine() is mock_engine
+
+    def test_init_failure_returns_none(self):
+        with (
+            patch(
+                "app.services.document_processing.image_extraction.OCR_AVAILABLE",
+                True,
+            ),
+            patch(
+                "app.services.document_processing.image_extraction.PaddleOCR",
+                side_effect=RuntimeError("paddle fail"),
+            ),
+        ):
+            assert initialize_ocr_engine() is None
+
+
+class TestRunOcrWrapper:
+    @pytest.mark.asyncio
+    async def test_run_ocr_delegates_to_optimized(self):
+        img = _get_image().new("RGB", (50, 50))
+        with patch(
+            "app.services.document_processing.image_extraction.run_ocr_optimized",
+            new_callable=AsyncMock,
+            return_value="ok",
+        ) as opt:
+            from app.services.document_processing.image_extraction import run_ocr
+
+            out = await run_ocr(img, ocr_available=True, ocr_engine=MagicMock())
+        assert out == "ok"
+        opt.assert_awaited_once()
+
+
+class TestRunPageOcr:
+    @pytest.mark.asyncio
+    async def test_disabled_returns_empty(self):
+        from app.services.document_processing.image_extraction import run_page_ocr
+
+        assert (
+            await run_page_ocr(MagicMock(), ocr_available=False, ocr_engine=None) == ""
+        )
+
+    @pytest.mark.asyncio
+    async def test_render_failure_returns_empty(self):
+        from app.services.document_processing.image_extraction import run_page_ocr
+
+        loop = __import__("asyncio").get_event_loop()
+
+        async def fake_exec(_pool, func):
+            return func()
+
+        with patch.object(loop, "run_in_executor", side_effect=fake_exec):
+            out = await run_page_ocr(
+                MagicMock(),
+                ocr_available=True,
+                ocr_engine=MagicMock(),
+            )
+        assert out == ""
+
+
+class TestRunPaddleOcrExtra:
+    def test_ocr_exception_returns_empty(self):
+        mock_engine = MagicMock()
+        mock_engine.ocr.side_effect = RuntimeError("ocr boom")
+        img = _get_image().new("RGB", (10, 10))
+        assert run_paddle_ocr(img, mock_engine) == ""
+
 
 class TestProcessImageBranches:
     @pytest.mark.asyncio

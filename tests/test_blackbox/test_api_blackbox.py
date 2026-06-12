@@ -22,7 +22,9 @@ def _assert_json_error_structure(response, expected_status: int | None = None) -
     return data
 
 
-def _assert_success_or_sanitized_server_error(response, allowed_statuses: set[int]) -> None:
+def _assert_success_or_sanitized_server_error(
+    response, allowed_statuses: set[int]
+) -> None:
     assert response.status_code in allowed_statuses
     if response.status_code >= 500:
         _assert_json_error_structure(response, response.status_code)
@@ -146,7 +148,10 @@ class TestHealthAndMonitoringEndpoints:
 
         assert response.status_code == 200
         content_type = response.headers.get("content-type", "")
-        assert any(kind in content_type for kind in ("text/plain", "text/", "application/openmetrics-text"))
+        assert any(
+            kind in content_type
+            for kind in ("text/plain", "text/", "application/openmetrics-text")
+        )
 
     def test_monitoring_health_endpoint_returns_json(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -179,7 +184,9 @@ class TestHealthAndMonitoringEndpoints:
     def test_rate_limit_info_endpoint_returns_200(
         self, client: TestClient, auth_headers: dict[str, str]
     ):
-        response = client.get("/api/efficiency/rate-limit/test-blackbox", headers=auth_headers)
+        response = client.get(
+            "/api/efficiency/rate-limit/test-blackbox", headers=auth_headers
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -220,12 +227,15 @@ class TestRequestValidation:
 
         _assert_json_error_structure(response, 422)
 
-    def test_goal_validate_rejects_empty_body(
+    def test_goal_validate_empty_form_returns_validation_payload(
         self, client: TestClient, auth_headers: dict[str, str]
     ):
+        """POST tanpa field: API memvalidasi goal kosong → 200 + is_valid=False."""
         response = client.post("/api/goals/validate", headers=auth_headers)
 
-        _assert_json_error_structure(response, 422)
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("is_valid") is False
 
     def test_goal_refine_rejects_empty_body(
         self, client: TestClient, auth_headers: dict[str, str]
