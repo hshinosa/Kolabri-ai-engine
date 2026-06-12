@@ -76,6 +76,13 @@ async def process_pdf(
     else:
         raise ValueError("Either content or file_path must be provided for PDF processing")
     page_count = len(pdf_doc)
+    meta = metadata or {}
+    force_ocr = bool(meta.get("perform_ocr"))
+    extract_images = meta.get("extract_images", True)
+    if extract_images is False:
+        extract_images = False
+    else:
+        extract_images = True
 
     for page_num, page in enumerate(pdf_doc, start=1):
         page_text_parts = []
@@ -86,7 +93,7 @@ async def process_pdf(
         if text.strip():
             page_text_parts.append(text.strip())
 
-        should_ocr = ocr_available and text_length < min_text_length_for_ocr
+        should_ocr = ocr_available and (force_ocr or text_length < min_text_length_for_ocr)
 
         if should_ocr and ocr_fn:
             ocr_text = await ocr_fn(page)
@@ -94,7 +101,7 @@ async def process_pdf(
                 page_text_parts.append(f"[OCR]: {ocr_text.strip()}")
                 image_count += 1
 
-        if vision_available and caption_fn:
+        if extract_images and vision_available and caption_fn:
             image_list = page.get_images(full=True)
             for img_index, img in enumerate(image_list[:max_images_per_page]):
                 pil_img = None

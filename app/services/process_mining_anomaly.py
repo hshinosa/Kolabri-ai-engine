@@ -609,14 +609,13 @@ class ProcessMiningAnomalyDetector:
             # Check for bottlenecks
             bottlenecks = []
             for phase, durations in phase_durations.items():
-                if durations:
-                    avg_duration = statistics.mean(durations)
-                    if avg_duration > self.MAX_SILENCE_DURATION_MINUTES:
-                        bottlenecks.append({
-                            "phase": phase,
-                            "avg_duration": avg_duration,
-                            "max_duration": max(durations)
-                        })
+                avg_duration = self._average_phase_duration(durations)
+                if avg_duration is not None and avg_duration > self.MAX_SILENCE_DURATION_MINUTES:
+                    bottlenecks.append({
+                        "phase": phase,
+                        "avg_duration": avg_duration,
+                        "max_duration": max(durations),
+                    })
             
             if bottlenecks:
                 bottleneck_info = ", ".join([
@@ -754,6 +753,11 @@ class ProcessMiningAnomalyDetector:
         """Convert severity to numeric score for comparison."""
         severity_scores = {"low": 1, "medium": 2, "high": 3}
         return severity_scores.get(severity, 0)
+    @staticmethod
+    def _average_phase_duration(durations: List[float]) -> Optional[float]:
+        if not durations:
+            return None
+        return statistics.mean(durations)
 
 
 # Singleton instance

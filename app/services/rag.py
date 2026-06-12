@@ -6,7 +6,7 @@ Includes Policy Agent for retrieval optimization and pedagogical guardrails.
 """
 
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import math
 
@@ -18,6 +18,7 @@ from app.core.prompt_templates import (
     SYSTEM_RAG_NO_CONTEXT,
     TEMPERATURE,
 )
+from app.core.prompt_styles import SCAFFOLDING_EARLY_STYLE, SCAFFOLDING_LATE_STYLE
 from app.services.vector_store import get_vector_store, VectorStoreService
 from app.services.reranker import get_reranker, CrossEncoderReranker
 from app.services.rag_quality import RetrievalQualityControls
@@ -49,6 +50,7 @@ class RAGResult:
     processing_time_ms: float = 0
     outcome: Optional[str] = None
     reason: Optional[str] = None
+    citations: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class RAGPipeline:
@@ -208,6 +210,8 @@ class RAGPipeline:
         fading_level: float = 0.0,
         score_threshold: Optional[float] = None,
         guardrail_context: Optional[Dict[str, Any]] = None,
+        session_week_index: Optional[int] = None,
+        max_week_index: Optional[int] = None,
     ) -> RAGResult:
         """
         Execute a RAG query with Policy-Based optimization, guardrails, and efficiency caching.
@@ -224,11 +228,22 @@ class RAGPipeline:
         """
         start_time = datetime.now()
 
+        from app.services.week_rag import (
+            rank_week_boosted_results,
+            sources_to_citations,
+            week_metadata_filter,
+        )
+
+        effective_filter = filter_metadata
+        week_cap = week_metadata_filter(max_week_index)
+        if week_cap:
+            effective_filter = {**(filter_metadata or {}), **week_cap}
+
         # Build context for caching
         cache_context = {
             "collection_name": collection_name,
             "n_results": n_results,
-            "filter_metadata": filter_metadata,
+            "filter_metadata": effective_filter,
             "score_threshold": score_threshold,
         }
 
@@ -334,8 +349,11 @@ class RAGPipeline:
                         query=query,
                         collection_name=collection_name,
                         n_results=plan.top_k,
-                        where=filter_metadata,
+                        where=effective_filter,
                         score_threshold=plan.score_threshold,
+                    )
+                    search_results = rank_week_boosted_results(
+                        search_results, session_week_index
                     )
 
                     if not search_results:
@@ -383,11 +401,25 @@ class RAGPipeline:
                     self._last_contexts = contexts
 
                 # Step 3: Generate response with RAG
+                scaffolding_ctx = None
+                if guardrail_context and guardrail_context.get("scaffolding_config"):
+                    sc = guardrail_context["scaffolding_config"]
+                    if sc.get("enabled", True):
+                        level = sc.get("scaffolding_level") or "auto"
+                        style = ""
+                        if level == "early":
+                            style = SCAFFOLDING_EARLY_STYLE
+                        elif level == "late":
+                            style = SCAFFOLDING_LATE_STYLE
+                        scaffolding_ctx = (
+                            f"Scaffolding level for this cohort: {level}. {style}"
+                        )
                 llm_response = await self.llm_service.generate_rag_response(
                     query=query,
                     contexts=contexts,
                     chat_history=chat_history,
                     fading_level=fading_level,
+                    context=scaffolding_ctx,
                 )
 
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
@@ -468,6 +500,7 @@ class RAGPipeline:
 
                 # Step 5: Extract sources
                 sources = self._extract_sources(search_results)
+                citations = sources_to_citations(search_results)
 
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
@@ -487,6 +520,7 @@ class RAGPipeline:
                     scaffolding_triggered=scaffolding_triggered,
                     error=llm_response.error,
                     processing_time_ms=processing_time,
+                    citations=citations,
                 )
 
             except Exception:

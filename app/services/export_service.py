@@ -35,7 +35,7 @@ class ExportService:
         self._db = self._client[settings.MONGO_DB_NAME]
         self._initialized = True
         logger.info("export_service_initialized", db=settings.MONGO_DB_NAME)
-    
+
     async def aggregate_activity_by_group(self, group_id: str) -> List[Dict[str, Any]]:
         """
         Agregasi metrik keterlibatan mahasiswa per group.
@@ -74,14 +74,7 @@ class ExportService:
                     m["hot_count"] += 1
                 m["total_lexical_variety"] += attr.get("lexical_variety", 0.0)
             
-            # Calculate final scores
-            for m in user_metrics.values():
-                cnt = m["message_count"]
-                if cnt > 0:
-                    m["avg_lexical_variety"] = round(m["total_lexical_variety"] / cnt, 2)
-                    hot_p = (m["hot_count"] / cnt) * 100
-                    # Weight: 40% HOT, 60% Lexical
-                    m["engagement_score"] = round((hot_p * 0.4) + (m["avg_lexical_variety"] * 60), 1)
+            _finalize_group_engagement_metrics(user_metrics)
             
             return sorted(user_metrics.values(), key=lambda x: x["engagement_score"], reverse=True)
             
@@ -132,9 +125,7 @@ class ExportService:
                     m["hot_count"] += 1
                 m["total_lexical_variety"] += attr.get("lexical_variety", 0.0)
             
-            for m in user_metrics.values():
-                if m["message_count"] > 0:
-                    m["avg_lexical_variety"] = round(m["total_lexical_variety"] / m["message_count"], 2)
+            _finalize_chat_space_metrics(user_metrics)
             
             return sorted(user_metrics.values(), key=lambda x: x["message_count"], reverse=True)
             
@@ -343,6 +334,26 @@ class ExportService:
             self._initialized = False
             logger.info("export_service_closed")
 
+
+
+
+
+def _finalize_group_engagement_metrics(user_metrics: Dict[str, Dict[str, Any]]) -> None:
+    """Compute avg lexical and engagement scores; skip users with zero messages."""
+    for m in user_metrics.values():
+        cnt = m["message_count"]
+        if cnt > 0:
+            m["avg_lexical_variety"] = round(m["total_lexical_variety"] / cnt, 2)
+            hot_p = (m["hot_count"] / cnt) * 100
+            m["engagement_score"] = round((hot_p * 0.4) + (m["avg_lexical_variety"] * 60), 1)
+
+
+def _finalize_chat_space_metrics(user_metrics: Dict[str, Dict[str, Any]]) -> None:
+    for m in user_metrics.values():
+        if m["message_count"] > 0:
+            m["avg_lexical_variety"] = round(
+                m["total_lexical_variety"] / m["message_count"], 2
+            )
 
 # Singleton instance
 _export_service: Optional[ExportService] = None

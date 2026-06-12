@@ -89,8 +89,6 @@ def create_chunks(
             start = end
         else:
             start = new_start
-        if start >= len(text):
-            break
 
     for chunk in chunks:
         chunk.metadata["chunk_count"] = len(chunks)

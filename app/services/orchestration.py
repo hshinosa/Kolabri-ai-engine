@@ -48,6 +48,7 @@ class OrchestrationResult:
     quality_score: Optional[float]
     success: bool
     error: Optional[str] = None
+    citations: Optional[List[Dict[str, Any]]] = None
 
 
 class Orchestrator:
@@ -84,13 +85,18 @@ class Orchestrator:
             fading = self._group_fading_levels.get(group_id, 0.0)
 
             # 2. RAG Generation
+            scaffolding_config = kwargs.get("scaffolding_config") or {}
+            effective_level = scaffolding_config.get("scaffolding_level") or "auto"
             rag_result = await self.rag.query(
                 query=message,
                 collection_name=kwargs.get("collection_name"),
                 fading_level=fading,
                 guardrail_context={
-                    "guardrail_policy": kwargs.get("guardrail_policy") or {}
+                    "guardrail_policy": kwargs.get("guardrail_policy") or {},
+                    "scaffolding_config": scaffolding_config,
                 },
+                session_week_index=kwargs.get("session_week_index"),
+                max_week_index=kwargs.get("max_week_index"),
             )
             bot_reply = (
                 rag_result.answer if rag_result.success else "Maaf, terjadi kesalahan."
@@ -123,6 +129,9 @@ class Orchestrator:
             )
 
             # Log Bot Response
+            scaffolding_outcome = (
+                "applied" if scaffolding_config.get("enabled", True) else "disabled"
+            )
             await self.mongo_logger.log_activity(
                 {
                     "CaseID": case_id,
@@ -141,6 +150,8 @@ class Orchestrator:
                         "grounding_ratio": getattr(rag_result, "grounding_ratio", None),
                         "srl_phase": getattr(rag_result, "srl_phase", None),
                         "srl_sub_phase": getattr(rag_result, "srl_sub_phase", None),
+                        "scaffolding_level": effective_level,
+                        "scaffolding_outcome": scaffolding_outcome,
                     },
                 }
             )
@@ -203,15 +214,19 @@ class Orchestrator:
                             anoms.description,
                         )
 
+            analytics_dict = self._analytics_to_dict(analytics)
+            analytics_dict["scaffolding_level"] = effective_level
+            analytics_dict["scaffolding_outcome"] = scaffolding_outcome
             return OrchestrationResult(
                 bot_reply,
                 int_msg,
                 int_type,
-                self._analytics_to_dict(analytics),
+                analytics_dict,
                 "FETCH" if rag_result.sources else "NO_FETCH",
                 notify,
                 q_score,
                 True,
+                citations=getattr(rag_result, "citations", None) or [],
             )
 
         except Exception:
@@ -226,6 +241,7 @@ class Orchestrator:
                 None,
                 False,
                 "Internal error",
+                citations=[],
             )
 
     async def get_group_dashboard_data(self, group_id: str) -> Dict[str, Any]:
@@ -336,10 +352,21 @@ class Orchestrator:
         }
 
     async def validate_goal(
-        self, goal_text: str, user_id: str, chat_space_id: str
+        self,
+        goal_text: str,
+        user_id: str,
+        chat_space_id: str,
+        week_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Validate learning goal and handle adaptive fading (thread-safe)."""
         res = self.goal_validator.validate_goal(goal_text)
+        week_off_topic = False
+        if week_context and week_context.get("week_title"):
+            titles = week_context.get("material_titles") or []
+            if len(goal_text.split()) >= 8 and titles:
+                overlap = sum(
+                    1 for t in titles if t and t.lower()[:12] in goal_text.lower()
+                )
+                week_off_topic = overlap == 0 and res.is_valid
 
         async with self._state_lock:
             streak = self._group_smart_streak.get(chat_space_id, 0)
@@ -388,13 +415,23 @@ class Orchestrator:
             }
         )
 
+        is_valid = res.is_valid and not week_off_topic
+        status = "accepted" if is_valid else "revise"
+        hint = self.goal_validator.generate_socratic_hint(res.missing_criteria)
+        if week_off_topic:
+            week_title = week_context.get("week_title", "minggu ini")
+            mats = ", ".join((week_context.get("material_titles") or [])[:5])
+            hint = (
+                f"Goal belum selaras dengan {week_title}. "
+                f"Hubungkan tujuan dengan materi minggu (mis. {mats}). {hint}"
+            ).strip()
+
         return {
-            "is_valid": res.is_valid,
+            "is_valid": is_valid,
+            "status": status,
             "score": res.score,
             "feedback": res.feedback,
-            "socratic_hint": self.goal_validator.generate_socratic_hint(
-                res.missing_criteria
-            ),
+            "socratic_hint": hint,
             "missing_criteria": res.missing_criteria,
             "details": res.details,
             "success": True,

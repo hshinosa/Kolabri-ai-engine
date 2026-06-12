@@ -3,7 +3,15 @@ import uuid
 from typing import List, Dict, Any, Optional
 
 from qdrant_client import QdrantClient, AsyncQdrantClient, models
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    Filter,
+    FieldCondition,
+    MatchValue,
+    Range,
+)
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -38,7 +46,11 @@ class VectorStoreService:
         )
 
         self._initialized = True
-        logger.info("vector_store_initialized", url=settings.QDRANT_URL, vector_size=self._vector_size)
+        logger.info(
+            "vector_store_initialized",
+            url=settings.QDRANT_URL,
+            vector_size=self._vector_size,
+        )
 
     async def _ensure_collection(self, collection_name: str) -> str:
         if not self._initialized:
@@ -88,7 +100,9 @@ class VectorStoreService:
         embeddings = await self._embedding_service.embed_texts(documents)
 
         points = []
-        for i, (doc, meta, doc_id, embedding) in enumerate(zip(documents, metadatas, ids, embeddings)):
+        for i, (doc, meta, doc_id, embedding) in enumerate(
+            zip(documents, metadatas, ids, embeddings)
+        ):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id))
             payload = {**meta, "content": doc, "document_id": doc_id}
             points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
@@ -98,7 +112,9 @@ class VectorStoreService:
             points=points,
         )
 
-        logger.info("documents_added", collection=target_collection, count=len(documents))
+        logger.info(
+            "documents_added", collection=target_collection, count=len(documents)
+        )
 
     async def search(
         self,
@@ -118,14 +134,23 @@ class VectorStoreService:
 
         query_embedding = await self._embedding_service.embed_query(query)
         effective_score_threshold = (
-            settings.SIMILARITY_THRESHOLD if score_threshold is None else score_threshold
+            settings.SIMILARITY_THRESHOLD
+            if score_threshold is None
+            else score_threshold
         )
 
         query_filter = None
         if where:
             conditions = []
             for key, value in where.items():
-                conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+                if isinstance(value, dict) and "$lte" in value:
+                    conditions.append(
+                        FieldCondition(key=key, range=Range(lte=float(value["$lte"])))
+                    )
+                else:
+                    conditions.append(
+                        FieldCondition(key=key, match=MatchValue(value=value))
+                    )
             query_filter = Filter(must=conditions)
 
         results = self._client.query_points(
@@ -142,13 +167,19 @@ class VectorStoreService:
                 continue
             payload = point.payload or {}
             content = payload.pop("content", "")
-            formatted.append({
-                "content": content,
-                "metadata": payload,
-                "score": point.score,
-            })
+            formatted.append(
+                {
+                    "content": content,
+                    "metadata": payload,
+                    "score": point.score,
+                }
+            )
 
-        logger.debug("search_executed", collection=target_collection, results_count=len(formatted))
+        logger.debug(
+            "search_executed",
+            collection=target_collection,
+            results_count=len(formatted),
+        )
         return formatted
 
     async def query(
@@ -191,7 +222,9 @@ class VectorStoreService:
             await self._ensure_collection(target_collection)
 
             if ids:
-                point_ids = [str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id)) for doc_id in ids]
+                point_ids = [
+                    str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id)) for doc_id in ids
+                ]
                 self._client.delete(
                     collection_name=target_collection,
                     points_selector=models.PointIdsList(points=point_ids),
@@ -199,13 +232,21 @@ class VectorStoreService:
             elif where:
                 conditions = []
                 for key, value in where.items():
-                    conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+                    conditions.append(
+                        FieldCondition(key=key, match=MatchValue(value=value))
+                    )
                 self._client.delete(
                     collection_name=target_collection,
-                    points_selector=models.FilterSelector(filter=Filter(must=conditions)),
+                    points_selector=models.FilterSelector(
+                        filter=Filter(must=conditions)
+                    ),
                 )
 
-            logger.info("documents_deleted", collection=target_collection, ids_count=len(ids) if ids else 0)
+            logger.info(
+                "documents_deleted",
+                collection=target_collection,
+                ids_count=len(ids) if ids else 0,
+            )
         except Exception:
             logger.exception("delete_failed", collection=target_collection)
             raise
@@ -231,11 +272,13 @@ class VectorStoreService:
         result = []
         for col in collections:
             info = self._client.get_collection(col.name)
-            result.append({
-                "name": col.name,
-                "metadata": {},
-                "count": info.points_count,
-            })
+            result.append(
+                {
+                    "name": col.name,
+                    "metadata": {},
+                    "count": info.points_count,
+                }
+            )
 
         return result
 

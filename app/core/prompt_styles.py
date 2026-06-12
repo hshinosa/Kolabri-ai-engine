@@ -32,3 +32,15 @@ SUMMARY_STYLE = (
     "Gunakan bullet points untuk poin utama dan action items bila relevan. "
     "Sorot kesimpulan, tindak lanjut, atau keputusan penting tanpa membuat paragraf panjang yang padat."
 )
+
+SCAFFOLDING_EARLY_STYLE = (
+    "Berikan scaffolding yang lebih terarah dan bertahap. "
+    "Gunakan langkah-langkah kecil, contoh konkret, dan pertanyaan pemandu untuk membantu mahasiswa membangun pemahaman dari dasar. "
+    "Dorong mereka untuk mencoba sendiri setelah diberi petunjuk, tapi jangan langsung memberikan jawaban lengkap."
+)
+
+SCAFFOLDING_LATE_STYLE = (
+    "Dorong kemandirian dan penalaran tingkat tinggi. "
+    "Berikan petunjuk minimal, arahkan ke sumber atau konsep yang relevan, dan ajukan pertanyaan terbuka yang menantang mahasiswa untuk mensintesis sendiri. "
+    "Hindari langkah-langkah rinci; fokus pada koneksi antar ide dan evaluasi kritis."
+)

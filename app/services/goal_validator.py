@@ -43,6 +43,17 @@ class SMARTValidationResult:
         return asdict(self)
 
 
+def strip_markdown_json_fence(content: str) -> str:
+    """Remove optional ``` / ```json fences from an LLM JSON payload."""
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.split("\n")
+    start = 1 if lines[0].startswith("```") else 0
+    end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
+    return "\n".join(lines[start:end]).strip()
+
+
 class GoalValidator:
     """
     Service to validate learning goals against SMART criteria.
@@ -373,23 +384,13 @@ class GoalValidator:
                     except Exception:
                         # If that fails, use ASCII with replacement
                         content = content.encode('ascii', errors='replace').decode('ascii')
-                
-                # Strip markdown code blocks if present
-                # Handle ```json ... ``` or ``` ... ``` format
-                if content.strip().startswith('```'):
-                    # Remove the first ``` and last ```
-                    lines = content.strip().split('\n')
-                    if lines[0].startswith('```'):
-                        lines = lines[1:]  # Remove first line
-                    if lines[-1].strip() == '```':
-                        lines = lines[:-1]  # Remove last line
-                    content = '\n'.join(lines).strip()
-                
+                content = strip_markdown_json_fence(content)
+
                 result = json.loads(content)
-                
+
                 # Log the parsed result for debugging
                 logger.info("json_parsed_successfully", keys=list(result.keys()))
-                
+
                 # Check if the expected key exists, if not try to find alternative keys
                 if "refined_goal" not in result:
                     # Try to find alternative key names
@@ -408,13 +409,13 @@ class GoalValidator:
                         logger.error("json_missing_required_key", available_keys=list(result.keys()))
                         raise KeyError(f"Missing 'refined_goal' key in JSON response. Available keys: {list(result.keys())}")
                 
-                # Validate the refined goal
                 refined_goal_text = result["refined_goal"]
-                logger.info("validating_refined_goal", refined_goal=refined_goal_text[:100])
-                
+
                 if not isinstance(refined_goal_text, str):
                     logger.error("refined_goal_not_string", type=type(refined_goal_text).__name__)
                     raise TypeError(f"refined_goal must be a string, got {type(refined_goal_text).__name__}")
+
+                logger.info("validating_refined_goal", refined_goal=refined_goal_text[:100])
                 
                 validation = self.validate_goal(refined_goal_text)
                 
