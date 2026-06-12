@@ -46,9 +46,13 @@ python run_load_test.py --install
 
 ```bash
 # Di terminal lain, pastikan AI Engine berjalan
-cd ai-engine
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+cd Kolabri-ai-engine
+python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 ```
+
+Pastikan `.env` berisi `CORE_API_SECRET` (sama dengan yang dipakai Core-API). Locust memuat Bearer token otomatis via `locust_auth.py`.
+
+Semua skenario memanggil **`/api/*`** (bukan path lama tanpa prefix).
 
 ### 3. Jalankan Load Test
 
@@ -93,11 +97,11 @@ locust -f locustfile.py \
 
 | Endpoint | Weight | Deskripsi |
 |----------|--------|-----------|
-| `/health` | 10% | Baseline performance check |
-| `/ask` (RAG) | 50% | Query utama - endpoint kritis |
-| `/analytics/engagement` | 20% | Analisis engagement teks |
-| `/efficiency/*` | 10% | Cache & rate limit stats |
-| `/groups/*` | 10% | Group operations |
+| `/api/health` | 10% | Baseline performance check |
+| `/api/ask` (RAG) | 50% | Query utama - endpoint kritis |
+| `/api/analytics/engagement` | 20% | Analisis engagement teks |
+| `/api/efficiency/*` | 10% | Cache & rate limit stats |
+| `/api/groups/*` | 10% | Group operations |
 
 ### User Classes
 

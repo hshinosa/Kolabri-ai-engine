@@ -103,7 +103,7 @@ pytest tests/test_unit/ --cov=app
 pytest tests/test_unit/ -q --override-ini="addopts="
 ```
 
-Current status: 1378 tests passing.
+Current status (Juni 2026, verifikasi TA): **2411** tests passed (**2414** collected), **99,92%** line coverage on `app` (`pytest tests/ --cov=app`). See `../docs/evidence/bab4/PHASE0_SNAPSHOT.md`.
 
 ## Project structure
 
@@ -136,7 +136,7 @@ app/
     auth.py           API key authentication
 main.py               FastAPI app entrypoint
 tests/
-  test_unit/          Unit tests (1378 tests)
+  test_unit/          Unit tests (bagian dari suite 2411+)
 ```
 
 ## Related services
