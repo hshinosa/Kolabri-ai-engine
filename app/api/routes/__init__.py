@@ -13,6 +13,7 @@ from app.api.routes.orchestration import router as _orchestration_router
 from app.api.routes.interventions import router as _interventions_router
 from app.api.routes.documents import router as _documents_router
 from app.api.routes.chat import router as _chat_router
+from app.api.routes.discussion_direction import router as _discussion_direction_router
 
 from app.api.routes.documents import (
     _process_ingest_background,
@@ -33,6 +34,7 @@ router.include_router(_efficiency_router)
 router.include_router(_monitoring_router)
 router.include_router(_orchestration_router)
 router.include_router(_interventions_router)
+router.include_router(_discussion_direction_router)
 
 __all__ = [
     "router",

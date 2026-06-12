@@ -33,6 +33,9 @@ async def orchestrated_chat(request: OrchestrationRequest):
             course_id=request.course_id,
             chat_room_id=request.chat_room_id,
             guardrail_policy=request.guardrail_policy,
+            scaffolding_config=request.scaffolding_config,
+            session_week_index=request.session_week_index,
+            max_week_index=request.max_week_index,
         )
 
         return OrchestrationResponse(
@@ -50,7 +53,14 @@ async def orchestrated_chat(request: OrchestrationRequest):
             guardrail_reason=result.analytics.get("guardrail_reason")
             if result.analytics
             else None,
+            scaffolding_level=result.analytics.get("scaffolding_level")
+            if result.analytics
+            else None,
+            scaffolding_outcome=result.analytics.get("scaffolding_outcome")
+            if result.analytics
+            else None,
             error=result.error,
+            citations=result.citations or [],
         )
 
     except Exception:

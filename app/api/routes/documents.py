@@ -10,7 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse
 
 from app.api.schemas import BatchUploadResponse, IngestResponse
@@ -40,6 +48,9 @@ async def _process_ingest_background(
     original_filename: str,
     course_id: str,
     file_id: str,
+    extra_metadata: dict | None = None,
+    extract_images: bool = True,
+    perform_ocr: bool = True,
 ) -> None:
     start_time = datetime.now()
     try:
@@ -58,6 +69,7 @@ async def _process_ingest_background(
                 "file_id": file_id,
                 "original_filename": original_filename,
                 "upload_time": datetime.now().isoformat(),
+                **(extra_metadata or {}),
             },
         )
 
@@ -165,6 +177,7 @@ async def ingest_document(
     file: UploadFile = File(...),
     course_id: str = Form(...),
     file_id: str = Form(...),
+    extra_metadata: str | None = Form(None),
 ):
     validate_course_id(course_id)
 
@@ -173,7 +186,14 @@ async def ingest_document(
 
     ext = Path(file.filename).suffix.lower()
     supported_extensions = [
-        ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".txt", ".md", ".zip",
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".pptx",
+        ".ppt",
+        ".txt",
+        ".md",
+        ".zip",
     ]
 
     if ext not in supported_extensions:
@@ -214,12 +234,24 @@ async def ingest_document(
         raise
 
     original_filename = file.filename
+    parsed_extra: dict | None = None
+    if extra_metadata:
+        try:
+            import json as _json
+
+            parsed_extra = _json.loads(extra_metadata)
+            if not isinstance(parsed_extra, dict):
+                parsed_extra = None
+        except _json.JSONDecodeError:
+            parsed_extra = None
+
     background_tasks.add_task(
         _process_ingest_background,
         tmp_path=tmp_path,
         original_filename=original_filename,
         course_id=course_id,
         file_id=file_id,
+        extra_metadata=parsed_extra,
     )
 
     logger.info(
@@ -333,7 +365,9 @@ async def delete_document(
             collection_name=target_collection,
         )
 
-        logger.info("document_deleted", document_id=document_id, collection=target_collection)
+        logger.info(
+            "document_deleted", document_id=document_id, collection=target_collection
+        )
 
         return JSONResponse(
             content={

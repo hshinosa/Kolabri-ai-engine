@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import JSONResponse, Response
 
 from app.core.logging import get_logger
+from app.core.redis_cache import get_redis_cache, CACHE_TTL
 from app.api.schemas import (
     EngagementAnalysisRequest,
     EngagementAnalysisResponse,
@@ -28,9 +29,18 @@ _SAFE_ID_REGEX = r"^[a-zA-Z0-9_-]{1,64}$"
 
 def _safe_csv_filename(prefix: str, identifier: str) -> str:
     from urllib.parse import quote
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    safe_id = quote(identifier, safe='')
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_id = quote(identifier, safe="")
     return f"{prefix}_{safe_id}_{timestamp}.csv"
+
+
+def _case_id_from_export_line(line: str) -> str | None:
+    """First CSV field as case id; None for blank or whitespace-only rows."""
+    parts = line.split(",")
+    if not parts or not parts[0].strip():
+        return None
+    return parts[0].strip()
 
 
 @router.post(
@@ -76,8 +86,15 @@ async def analyze_engagement(request: EngagementAnalysisRequest):
 )
 async def get_group_dashboard(group_id: str):
     try:
+        redis_cache = await get_redis_cache()
+        cache_key = redis_cache.generate_key("analytics", "group_dashboard", group_id)
+        cached = await redis_cache.get(cache_key)
+        if cached is not None:
+            return JSONResponse(content=cached)
+
         orchestrator = get_orchestrator()
         data = await orchestrator.get_group_dashboard_data(group_id)
+        await redis_cache.set(cache_key, data, ttl=CACHE_TTL["analytics"])
         return JSONResponse(content=data)
     except Exception:
         logger.exception("group_dashboard_api_failed")
@@ -91,8 +108,17 @@ async def get_group_dashboard(group_id: str):
 )
 async def get_individual_dashboard(user_id: str):
     try:
+        redis_cache = await get_redis_cache()
+        cache_key = redis_cache.generate_key(
+            "analytics", "individual_dashboard", user_id
+        )
+        cached = await redis_cache.get(cache_key)
+        if cached is not None:
+            return JSONResponse(content=cached)
+
         orchestrator = get_orchestrator()
         data = await orchestrator.get_individual_dashboard_data(user_id)
+        await redis_cache.set(cache_key, data, ttl=CACHE_TTL["analytics"])
         return JSONResponse(content=data)
     except Exception:
         logger.exception("individual_dashboard_api_failed")
@@ -114,7 +140,9 @@ async def get_dashboard_data_legacy(group_id: str):
     summary="Export group activity data to CSV (Student Breakdown)",
 )
 async def export_group_activity_csv(
-    group_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric group identifier"),
+    group_id: str = Path(
+        ..., pattern=_SAFE_ID_REGEX, description="Alphanumeric group identifier"
+    ),
 ):
     try:
         export_service = get_export_service()
@@ -139,7 +167,9 @@ async def export_group_activity_csv(
     summary="Export chat space activity data to CSV",
 )
 async def export_chat_space_activity_csv(
-    chat_space_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric chat space identifier"),
+    chat_space_id: str = Path(
+        ..., pattern=_SAFE_ID_REGEX, description="Alphanumeric chat space identifier"
+    ),
     include_detailed: bool = Query(True, description="Include detailed metrics"),
 ):
     try:
@@ -175,10 +205,13 @@ async def export_chat_space_activity_csv(
     summary="Export raw event logs to CSV for Process Mining (XES compatible)",
 )
 async def export_process_mining_csv(
-    case_id: str = Path(..., pattern=_SAFE_ID_REGEX, description="Alphanumeric case identifier"),
+    case_id: str = Path(
+        ..., pattern=_SAFE_ID_REGEX, description="Alphanumeric case identifier"
+    ),
 ):
     try:
         from app.services.mongodb_logger import get_mongo_logger as _get_mongo
+
         mongo_logger = _get_mongo()
 
         csv_data = await mongo_logger.export_to_csv(case_id=case_id)
@@ -239,7 +272,10 @@ async def get_group_analytics_alias(group_id: str):
     summary="Export process mining data (general)",
 )
 async def export_process_mining_general(
-    format: Optional[str] = Query(None, description="Response format: 'csv' for raw file, default is JSON metadata"),
+    format: Optional[str] = Query(
+        None,
+        description="Response format: 'csv' for raw file, default is JSON metadata",
+    ),
 ):
     try:
         mongo_logger = get_mongo_logger()
@@ -252,13 +288,15 @@ async def export_process_mining_general(
         if total_events > 0:
             case_ids = set()
             for line in lines[1:]:
-                parts = line.split(",")
-                if parts:
-                    case_ids.add(parts[0])
+                case_id = _case_id_from_export_line(line)
+                if case_id is not None:
+                    case_ids.add(case_id)
             unique_cases = len(case_ids)
 
         if format == "csv":
-            filename = f"process_mining_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            filename = (
+                f"process_mining_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            )
             logger.info("process_mining_general_export_csv", size_bytes=len(csv_data))
             return Response(
                 content=csv_data,

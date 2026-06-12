@@ -3,9 +3,11 @@ Goal validation & refinement endpoints.
 """
 
 import json
+from typing import Any, Optional
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.services.orchestration import get_orchestrator
@@ -15,19 +17,46 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+class GoalValidateBody(BaseModel):
+    goal_text: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    chat_space_id: str = Field(..., min_length=1)
+    week_context: Optional[dict[str, Any]] = None
+
+
 @router.post(
     "/goals/validate",
     tags=["Goals"],
     summary="Validate a learning goal against SMART criteria",
 )
-async def validate_goal(
-    goal_text: str = Form(...), user_id: str = Form(...), chat_space_id: str = Form(...)
-):
+async def validate_goal(request: Request):
     try:
-        orchestrator = get_orchestrator()
+        content_type = request.headers.get("content-type", "")
+        week_context = None
+        if "application/json" in content_type:
+            body = GoalValidateBody.model_validate(await request.json())
+            goal_text = body.goal_text
+            user_id = body.user_id
+            chat_space_id = body.chat_space_id
+            week_context = body.week_context
+        else:
+            form = await request.form()
+            goal_text = str(form.get("goal_text", ""))
+            user_id = str(form.get("user_id", ""))
+            chat_space_id = str(form.get("chat_space_id", ""))
+            raw_ctx = form.get("week_context")
+            if raw_ctx:
+                try:
+                    week_context = json.loads(str(raw_ctx))
+                except json.JSONDecodeError:
+                    week_context = None
 
+        orchestrator = get_orchestrator()
         result = await orchestrator.validate_goal(
-            goal_text=goal_text, user_id=user_id, chat_space_id=chat_space_id
+            goal_text=goal_text,
+            user_id=user_id,
+            chat_space_id=chat_space_id,
+            week_context=week_context,
         )
 
         logger.info(
@@ -41,7 +70,7 @@ async def validate_goal(
         return JSONResponse(content=result)
 
     except Exception:
-        logger.exception("goal_validation_api_failed", user_id=user_id)
+        logger.exception("goal_validation_api_failed")
         raise
 
 

@@ -129,6 +129,7 @@ class AskRequest(BaseModel):
     user_name: Optional[str] = Field(None, max_length=100)
     chat_space_id: Optional[str] = Field(None, max_length=64)
     guardrail_policy: Optional[dict[str, Any]] = None
+    scaffolding_config: Optional[dict[str, Any]] = None
 
     @field_validator("course_id", "chat_space_id")
     @classmethod
@@ -326,6 +327,10 @@ class OrchestrationRequest(BaseModel):
     course_id: Optional[str] = Field(None, max_length=64)
     chat_room_id: Optional[str] = Field(None, max_length=64)
     guardrail_policy: Optional[dict[str, Any]] = None
+    scaffolding_config: Optional[dict[str, Any]] = None
+    session_week_index: Optional[int] = Field(None, ge=1)
+    max_week_index: Optional[int] = Field(None, ge=1)
+    week_context: Optional[dict[str, Any]] = None
 
     @field_validator(
         "user_id", "group_id", "course_id", "chat_room_id", "collection_name"
@@ -350,7 +355,10 @@ class OrchestrationResponse(BaseModel):
     meta: Dict[str, Any] = {}
     guardrail_outcome: Optional[str] = None
     guardrail_reason: Optional[str] = None
+    scaffolding_level: Optional[str] = None
+    scaffolding_outcome: Optional[str] = None
     error: Optional[str] = None
+    citations: List[Dict[str, Any]] = []
 
 
 class GroupAnalyticsRequest(BaseModel):
