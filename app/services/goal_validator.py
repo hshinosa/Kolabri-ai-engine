@@ -379,6 +379,54 @@ class GoalValidator:
 
         return hints.get(first_missing, "Coba perjelas tujuan Anda agar lebih terukur.")
 
+    async def generate_llm_hint(
+        self,
+        goal_text: str,
+        missing_criteria: List[str],
+        week_context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        try:
+            from app.services.llm import get_llm_service
+            from app.core.prompt_templates import SYSTEM_GOAL_HINT
+
+            llm = get_llm_service()
+            week_title = (week_context or {}).get("week_title", "topik minggu ini")
+            material_titles = (week_context or {}).get("material_titles") or []
+            mats_str = (
+                ", ".join(material_titles[:5]) if material_titles else "belum ada"
+            )
+
+            system_prompt = SYSTEM_GOAL_HINT.format(
+                missing_criteria=", ".join(missing_criteria),
+                week_title=week_title,
+                material_titles=mats_str,
+                goal_text=goal_text,
+            )
+
+            prompt = (
+                f'Goal mahasiswa: "{goal_text}"\n'
+                f"Kriteria yang kurang: {', '.join(missing_criteria)}\n"
+                f"Berikan satu pertanyaan Socratic singkat untuk membimbingnya."
+            )
+
+            response = await llm.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.7,
+                max_tokens=100,
+            )
+
+            if response.success and response.content.strip():
+                hint = response.content.strip().strip('"').strip("'")
+                if len(hint) > 200:
+                    hint = hint[:197] + "..."
+                return hint
+
+            return None
+        except Exception:
+            logger.warning("llm_goal_hint_failed", goal_text=goal_text[:80])
+            return None
+
     async def refine_goal(
         self, current_goal: str, missing_criteria: List[str]
     ) -> Dict[str, Any]:
