@@ -316,6 +316,13 @@ class ErrorResponse(BaseModel):
 # ============== Orchestration (Teacher-AI Complementarity) ==============
 
 
+class ChatHistoryItem(BaseModel):
+    """A message in the conversation history for context."""
+
+    role: str  # 'user' or 'assistant'
+    content: str
+
+
 class OrchestrationRequest(BaseModel):
     """Request for orchestrated message handling."""
 
@@ -331,6 +338,7 @@ class OrchestrationRequest(BaseModel):
     session_week_index: Optional[int] = Field(None, ge=1)
     max_week_index: Optional[int] = Field(None, ge=1)
     week_context: Optional[dict[str, Any]] = None
+    chat_history: Optional[List[ChatHistoryItem]] = Field(None, max_length=20)
 
     @field_validator(
         "user_id", "group_id", "course_id", "chat_room_id", "collection_name"

@@ -6,6 +6,7 @@ loop by integrating RAG, Analytics, Anomaly Detection, and Proactive Interventio
 """
 
 import asyncio
+import re
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -87,10 +88,29 @@ class Orchestrator:
             # 2. RAG Generation
             scaffolding_config = kwargs.get("scaffolding_config") or {}
             effective_level = scaffolding_config.get("scaffolding_level") or "auto"
+
+            from app.services.llm import ChatMessage
+
+            raw_history = kwargs.get("chat_history") or []
+            chat_history = (
+                [
+                    ChatMessage(
+                        role=m.role if hasattr(m, "role") else m.get("role", "user"),
+                        content=m.content
+                        if hasattr(m, "content")
+                        else m.get("content", ""),
+                    )
+                    for m in raw_history[-10:]
+                ]
+                if raw_history
+                else None
+            )
+
             rag_result = await self.rag.query(
                 query=message,
                 collection_name=kwargs.get("collection_name"),
                 fading_level=fading,
+                chat_history=chat_history,
                 guardrail_context={
                     "guardrail_policy": kwargs.get("guardrail_policy") or {},
                     "scaffolding_config": scaffolding_config,
@@ -363,10 +383,28 @@ class Orchestrator:
         if week_context and week_context.get("week_title"):
             titles = week_context.get("material_titles") or []
             if len(goal_text.split()) >= 8 and titles:
-                overlap = sum(
-                    1 for t in titles if t and t.lower()[:12] in goal_text.lower()
-                )
+                goal_words = set(re.findall(r"[a-z]{4,}", goal_text.lower()))
+
+                overlap = 0
+                for t in titles:
+                    if not t:
+                        continue
+                    title_words = set(re.findall(r"[a-z]{4,}", t.lower()))
+                    if title_words & goal_words:
+                        overlap += 1
+
                 week_off_topic = overlap == 0
+                logger.info(
+                    "off_topic_check",
+                    goal_words=sorted(goal_words)[:15],
+                    title_words_all=[
+                        sorted(set(re.findall(r"[a-z]{4,}", t.lower())))
+                        for t in titles
+                        if t
+                    ],
+                    overlap_count=overlap,
+                    week_off_topic=week_off_topic,
+                )
 
         async with self._state_lock:
             streak = self._group_smart_streak.get(chat_space_id, 0)

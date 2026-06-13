@@ -290,8 +290,27 @@ class RAGPipeline:
                 # Use sanitized input if available
                 safe_query = guardrail_result.sanitized_input or query
 
+                # Query rewriting: enrich short follow-up queries with chat history context
+                search_query = safe_query
+                if chat_history and len(safe_query.split()) <= 6:
+                    last_assistant = None
+                    for msg in reversed(chat_history):
+                        if msg.role == "assistant":
+                            last_assistant = msg.content
+                            break
+                    if last_assistant:
+                        topic_hint = last_assistant[:200]
+                        search_query = (
+                            f"{safe_query} (konteks sebelumnya: {topic_hint})"
+                        )
+                        logger.info(
+                            "rag_query_rewritten",
+                            original=safe_query[:80],
+                            rewritten=search_query[:120],
+                        )
+
                 # Step 1: Policy decision - FETCH or NO_FETCH
-                should_fetch = self._should_retrieve(safe_query, self._last_contexts)
+                should_fetch = self._should_retrieve(search_query, self._last_contexts)
                 action_taken = "FETCH" if should_fetch else "NO_FETCH"
 
                 if not should_fetch:
@@ -301,8 +320,17 @@ class RAGPipeline:
                         reason="policy_optimization",
                     )
 
+                    no_fetch_prompt = query
+                    if chat_history:
+                        history_lines = [
+                            f"{'Mahasiswa' if m.role == 'user' else 'Asisten'}: {m.content}"
+                            for m in chat_history[-5:]
+                        ]
+                        history_text = "\n".join(history_lines)
+                        no_fetch_prompt = f"Riwayat percakapan:\n{history_text}\n\nPertanyaan terbaru mahasiswa: {query}"
+
                     llm_response = await self.llm_service.generate(
-                        prompt=query,
+                        prompt=no_fetch_prompt,
                         system_prompt=SYSTEM_PERSONAL_CHAT,
                         temperature=TEMPERATURE["personal_chat"],
                     )
@@ -330,7 +358,7 @@ class RAGPipeline:
                 )
 
                 # [OPTIMIZATION] Check if we can reuse previous context
-                if await self._is_semantically_identical(query):
+                if await self._is_semantically_identical(search_query):
                     logger.info("rag_semantic_cache_hit", query=query[:50])
                     contexts = self._last_contexts
                     search_results = []  # Placeholder since we have contexts
@@ -338,7 +366,7 @@ class RAGPipeline:
                     from app.services.rag_retrieval_plan import build_retrieval_plan
 
                     plan = build_retrieval_plan(
-                        query=query,
+                        query=search_query,
                         query_type=None,
                         quality_controls=self.quality_controls,
                         requested_n_results=n_results,
@@ -346,7 +374,7 @@ class RAGPipeline:
                     )
 
                     search_results = await self.vector_store.search(
-                        query=query,
+                        query=search_query,
                         collection_name=collection_name,
                         n_results=plan.top_k,
                         where=effective_filter,
@@ -419,7 +447,6 @@ class RAGPipeline:
                     contexts=contexts,
                     chat_history=chat_history,
                     fading_level=fading_level,
-                    context=scaffolding_ctx,
                 )
 
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)

@@ -36,6 +36,7 @@ async def orchestrated_chat(request: OrchestrationRequest):
             scaffolding_config=request.scaffolding_config,
             session_week_index=request.session_week_index,
             max_week_index=request.max_week_index,
+            chat_history=request.chat_history,
         )
 
         return OrchestrationResponse(
