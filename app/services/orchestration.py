@@ -420,14 +420,26 @@ class Orchestrator:
 
         hint: Optional[str] = None
         if not is_valid and res.missing_criteria:
+            logger.info(
+                "attempting_llm_hint",
+                is_valid=is_valid,
+                missing_criteria=res.missing_criteria,
+                has_week_context=week_context is not None,
+            )
             hint = await self.goal_validator.generate_llm_hint(
                 goal_text, res.missing_criteria, week_context
+            )
+            logger.info(
+                "llm_hint_result",
+                hint_used=hint is not None,
+                hint_preview=hint[:80] if hint else None,
             )
 
         if not hint:
             hint = self.goal_validator.generate_socratic_hint(
                 res.missing_criteria, goal_text, week_context
             )
+            logger.info("using_fallback_hint", hint_preview=hint[:80] if hint else None)
 
         if week_off_topic:
             week_title = week_context.get("week_title", "minggu ini")

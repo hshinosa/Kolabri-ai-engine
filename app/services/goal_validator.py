@@ -386,6 +386,13 @@ class GoalValidator:
         week_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         try:
+            logger.info(
+                "generating_llm_hint",
+                goal_text=goal_text[:80],
+                missing_criteria=missing_criteria,
+                has_week_context=week_context is not None,
+            )
+
             from app.services.llm import get_llm_service
             from app.core.prompt_templates import SYSTEM_GOAL_HINT
 
@@ -416,15 +423,27 @@ class GoalValidator:
                 max_tokens=100,
             )
 
+            logger.info(
+                "llm_hint_response",
+                success=response.success,
+                content_length=len(response.content) if response.content else 0,
+                content_preview=response.content[:100] if response.content else None,
+                error=response.error if hasattr(response, "error") else None,
+            )
+
             if response.success and response.content.strip():
                 hint = response.content.strip().strip('"').strip("'")
                 if len(hint) > 200:
                     hint = hint[:197] + "..."
+                logger.info("llm_hint_generated", hint=hint)
                 return hint
 
+            logger.warning("llm_hint_empty_response", success=response.success)
             return None
-        except Exception:
-            logger.warning("llm_goal_hint_failed", goal_text=goal_text[:80])
+        except Exception as e:
+            logger.exception(
+                "llm_goal_hint_failed", goal_text=goal_text[:80], error=str(e)
+            )
             return None
 
     async def refine_goal(
