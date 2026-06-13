@@ -2,15 +2,30 @@ import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.prompt_templates import (
-    SYSTEM_RAG, SYSTEM_PERSONAL_CHAT, SYSTEM_INTERVENTION, SYSTEM_SUMMARY,
-    SYSTEM_SOCRATIC, SYSTEM_GOAL_VALIDATION, SYSTEM_GOAL_REFINEMENT,
-    RAG_FEW_SHOT, COT_RAG_TEMPLATE, COT_RAG_WITH_HISTORY,
-    COT_INTERVENTION_TEMPLATE, COT_SUMMARY_TEMPLATE,
-    COT_GOAL_VALIDATION, COT_GOAL_REFINEMENT, TEMPERATURE,
+    SYSTEM_RAG,
+    SYSTEM_PERSONAL_CHAT,
+    SYSTEM_INTERVENTION,
+    SYSTEM_SUMMARY,
+    SYSTEM_SOCRATIC,
+    SYSTEM_GOAL_VALIDATION,
+    SYSTEM_GOAL_REFINEMENT,
+    RAG_FEW_SHOT,
+    COT_RAG_TEMPLATE,
+    COT_RAG_WITH_HISTORY,
+    COT_INTERVENTION_TEMPLATE,
+    COT_SUMMARY_TEMPLATE,
+    COT_GOAL_VALIDATION,
+    COT_GOAL_REFINEMENT,
+    TEMPERATURE,
 )
 from app.services.circuit_breaker import (
     CircuitBreakerOpenError,
@@ -32,10 +47,12 @@ class LLMDegradedError(Exception):
         self.reason = reason
         self.retry_after = retry_after
 
+
 @dataclass
 class ChatMessage:
     role: str
     content: str
+
 
 @dataclass
 class LLMResponse:
@@ -45,6 +62,7 @@ class LLMResponse:
     details are logged via ``logger.exception(...)`` and never exposed in this
     field. Route handlers may safely propagate ``error`` to clients.
     """
+
     content: str
     tokens_used: int
     model: str
@@ -52,17 +70,18 @@ class LLMResponse:
     error: Optional[str] = None
     response_time_ms: float = 0.0
 
+
 class OpenAILLMService:
     SYSTEM_PROMPTS = {
-        'default': SYSTEM_PERSONAL_CHAT,
-        'rag': SYSTEM_RAG,
-        'intervention': SYSTEM_INTERVENTION,
-        'summary': SYSTEM_SUMMARY,
-        'socratic': SYSTEM_SOCRATIC,
-        'goal_validation': SYSTEM_GOAL_VALIDATION,
-        'goal_refinement': SYSTEM_GOAL_REFINEMENT,
+        "default": SYSTEM_PERSONAL_CHAT,
+        "rag": SYSTEM_RAG,
+        "intervention": SYSTEM_INTERVENTION,
+        "summary": SYSTEM_SUMMARY,
+        "socratic": SYSTEM_SOCRATIC,
+        "goal_validation": SYSTEM_GOAL_VALIDATION,
+        "goal_refinement": SYSTEM_GOAL_REFINEMENT,
     }
-    
+
     def __init__(self):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required")
@@ -75,7 +94,7 @@ class OpenAILLMService:
                 connect=settings.LLM_TIMEOUT_CONNECT_SECONDS,
                 read=settings.LLM_TIMEOUT_READ_SECONDS,
                 write=10.0,
-                pool=5.0
+                pool=5.0,
             ),
             http2=True,
         )
@@ -128,9 +147,7 @@ class OpenAILLMService:
                 retry_after=retry_after,
                 response_time_ms=round(elapsed, 2),
             )
-            raise LLMDegradedError(
-                reason="llm_circuit_open", retry_after=retry_after
-            )
+            raise LLMDegradedError(reason="llm_circuit_open", retry_after=retry_after)
         except (RateLimitError, APIConnectionError, APIError) as exc:
             elapsed = (time.time() - start) * 1000
             logger.warning(
@@ -144,16 +161,24 @@ class OpenAILLMService:
             )
         except Exception:
             elapsed = (time.time() - start) * 1000
-            logger.exception("llm_generation_failed", response_time_ms=round(elapsed, 2))
+            logger.exception(
+                "llm_generation_failed", response_time_ms=round(elapsed, 2)
+            )
             return LLMResponse(
-                content="", tokens_used=0, model=self.model, success=False,
-                error="Internal error", response_time_ms=elapsed
+                content="",
+                tokens_used=0,
+                model=self.model,
+                success=False,
+                error="Internal error",
+                response_time_ms=elapsed,
             )
 
     @retry(
         stop=stop_after_attempt(settings.LLM_MAX_RETRIES),
         wait=wait_exponential(
-            multiplier=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_MULTIPLIER,
+            multiplier=0.01
+            if settings.ENV == "testing"
+            else settings.LLM_RETRY_DELAY_MULTIPLIER,
             min=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_BASE,
         ),
         retry=retry_if_exception_type((RateLimitError, APIConnectionError))
@@ -162,6 +187,13 @@ class OpenAILLMService:
     )
     async def _execute_with_retry(self, messages, temperature, max_tokens):
         try:
+            logger.info(
+                "llm_request",
+                model=self.model,
+                message_count=len(messages),
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
             resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -170,6 +202,13 @@ class OpenAILLMService:
             )
             content = resp.choices[0].message.content or ""
             tokens = resp.usage.total_tokens if resp.usage else 0
+            logger.info(
+                "llm_response",
+                content_length=len(content),
+                content_preview=content[:100] if content else None,
+                tokens_used=tokens,
+                finish_reason=resp.choices[0].finish_reason if resp.choices else None,
+            )
             return LLMResponse(
                 content=content, tokens_used=tokens, model=self.model, success=True
             )
@@ -182,7 +221,11 @@ class OpenAILLMService:
             # Log and return failure for other errors (no retry)
             logger.exception("llm_generation_failed")
             return LLMResponse(
-                content="", tokens_used=0, model=self.model, success=False, error="Internal error"
+                content="",
+                tokens_used=0,
+                model=self.model,
+                success=False,
+                error="Internal error",
             )
 
     async def generate_rag_response(
@@ -204,8 +247,7 @@ class OpenAILLMService:
             prompt = COT_RAG_TEMPLATE.format(contexts=ctx_text, query=query)
 
         return await self.generate(
-            prompt=prompt, system_prompt=system_prompt,
-            temperature=TEMPERATURE["rag"]
+            prompt=prompt, system_prompt=system_prompt, temperature=TEMPERATURE["rag"]
         )
 
     async def generate_intervention(
@@ -224,8 +266,9 @@ class OpenAILLMService:
             messages=messages_text,
         )
         return await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["intervention"],
-            temperature=TEMPERATURE["intervention"]
+            prompt=prompt,
+            system_prompt=self.SYSTEM_PROMPTS["intervention"],
+            temperature=TEMPERATURE["intervention"],
         )
 
     async def generate_summary(
@@ -236,15 +279,17 @@ class OpenAILLMService:
         )
         prompt = COT_SUMMARY_TEMPLATE.format(messages=messages_text)
         return await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["summary"],
-            temperature=TEMPERATURE["summary"]
+            prompt=prompt,
+            system_prompt=self.SYSTEM_PROMPTS["summary"],
+            temperature=TEMPERATURE["summary"],
         )
 
     async def reframe_to_socratic(self, response: str) -> str:
         prompt = f"Jawaban langsung yang perlu diubah:\n{response}\n\nBuat 2-3 pertanyaan Socratic bertahap yang mengarah ke jawaban tersebut."
         result = await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["socratic"],
-            temperature=TEMPERATURE["socratic"]
+            prompt=prompt,
+            system_prompt=self.SYSTEM_PROMPTS["socratic"],
+            temperature=TEMPERATURE["socratic"],
         )
         return result.content if result.success else response
 
@@ -252,19 +297,19 @@ class OpenAILLMService:
         self, current_goal: str, missing_criteria: List[str]
     ) -> LLMResponse:
         prompt = COT_GOAL_REFINEMENT.format(
-            current_goal=current_goal,
-            missing_criteria=", ".join(missing_criteria)
+            current_goal=current_goal, missing_criteria=", ".join(missing_criteria)
         )
         return await self.generate(
-            prompt=prompt, system_prompt=self.SYSTEM_PROMPTS["goal_refinement"],
-            temperature=TEMPERATURE["goal_refinement"]
+            prompt=prompt,
+            system_prompt=self.SYSTEM_PROMPTS["goal_refinement"],
+            temperature=TEMPERATURE["goal_refinement"],
         )
 
     def _format_contexts(self, contexts: List[Dict[str, Any]]) -> str:
         """Format retrieved contexts for the prompt."""
         return "\n\n".join(
             [
-                f"[{i+1}] Sumber: {c.get('metadata', {}).get('source', 'Unknown')} (Halaman {c.get('metadata', {}).get('page', '?')})\n{c.get('content', '')}"
+                f"[{i + 1}] Sumber: {c.get('metadata', {}).get('source', 'Unknown')} (Halaman {c.get('metadata', {}).get('page', '?')})\n{c.get('content', '')}"
                 for i, c in enumerate(contexts)
             ]
         )
@@ -278,15 +323,18 @@ class OpenAILLMService:
             ]
         )
 
+
 OptimizedLLMService = OpenAILLMService
 
 _llm_service = None
+
 
 def get_llm_service():
     global _llm_service
     if _llm_service is None:
         _llm_service = OpenAILLMService()
     return _llm_service
+
 
 async def close_llm_service():
     global _llm_service
