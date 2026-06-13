@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     # RAG Configuration
     TOP_K_RESULTS: int = 7
-    SIMILARITY_THRESHOLD: float = 0.6
+    SIMILARITY_THRESHOLD: float = 0.35
     RAG_MIN_QUERY_WORDS: int = 3  # Minimum words for FETCH policy
     RAG_SEMANTIC_CACHE_THRESHOLD: float = 0.85
     RAG_GROUNDING_THRESHOLD: float = 0.4

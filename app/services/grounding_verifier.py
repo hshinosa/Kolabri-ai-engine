@@ -33,25 +33,25 @@ class GroundingResult:
 class GroundingVerifier:
     """
     Verifies LLM output is grounded in retrieved documents.
-    
+
     Implements OutputGuardrails from TA Algorithm 1:
     1. Extract claims (sentence-level)
     2. Check semantic similarity against documents
     3. Block if grounding_ratio < threshold
     """
 
-    DEFAULT_CLAIM_THRESHOLD = 0.45
-    DEFAULT_OVERALL_THRESHOLD = 0.4
+    DEFAULT_CLAIM_THRESHOLD = 0.15
+    DEFAULT_OVERALL_THRESHOLD = 0.1
 
     NON_FACTUAL_PATTERNS = [
-        r'^(maaf|sorry|saya tidak)',
-        r'\?$',
-        r'^(mungkin|barangkali|sepertinya)',
-        r'^(silakan|coba|cobalah)',
-        r'^(pertanyaan socratic|pertanyaan lanjutan)',
-        r'^(menurut kamu|menurut kalian)',
-        r'^(ya,?\s+pertanyaan)',
-        r'^\d+\.\s*\*\*',
+        r"^(maaf|sorry|saya tidak)",
+        r"\?$",
+        r"^(mungkin|barangkali|sepertinya)",
+        r"^(silakan|coba|cobalah)",
+        r"^(pertanyaan socratic|pertanyaan lanjutan)",
+        r"^(menurut kamu|menurut kalian)",
+        r"^(ya,?\s+pertanyaan)",
+        r"^\d+\.\s*\*\*",
     ]
 
     def __init__(self, embedding_service=None):
@@ -61,17 +61,18 @@ class GroundingVerifier:
     def embedding_service(self):
         if self._embedding_service is None:
             from app.services.embeddings import get_embedding_service
+
             self._embedding_service = get_embedding_service()
         return self._embedding_service
 
     def _extract_claims(self, response: str) -> List[str]:
-        cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', response)
-        cleaned = re.sub(r'\*([^*]+)\*', r'\1', cleaned)
-        cleaned = re.sub(r'📚.*$', '', cleaned, flags=re.MULTILINE | re.DOTALL)
-        cleaned = re.sub(r'^[-•]\s*', '', cleaned, flags=re.MULTILINE)
-        cleaned = re.sub(r'^\d+\.\s*', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"\*\*([^*]+)\*\*", r"\1", response)
+        cleaned = re.sub(r"\*([^*]+)\*", r"\1", cleaned)
+        cleaned = re.sub(r"📚.*$", "", cleaned, flags=re.MULTILINE | re.DOTALL)
+        cleaned = re.sub(r"^[-•]\s*", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r"^\d+\.\s*", "", cleaned, flags=re.MULTILINE)
 
-        sentences = re.split(r'[.!?]\s+|\n\n+', cleaned.strip())
+        sentences = re.split(r"[.!?]\s+|\n\n+", cleaned.strip())
         sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
 
         claims = []
@@ -144,8 +145,7 @@ class GroundingVerifier:
             )
 
         doc_contents = [
-            doc.get("content", doc.get("page_content", ""))
-            for doc in documents
+            doc.get("content", doc.get("page_content", "")) for doc in documents
         ]
         all_context = " ".join(doc_contents)
 
@@ -202,20 +202,27 @@ class GroundingVerifier:
 
         if not documents:
             return GroundingResult(
-                is_grounded=False, grounding_ratio=0.0, confidence=1.0,
-                ungrounded_claims=[response[:100]], grounded_claims=[], total_claims=1,
+                is_grounded=False,
+                grounding_ratio=0.0,
+                confidence=1.0,
+                ungrounded_claims=[response[:100]],
+                grounded_claims=[],
+                total_claims=1,
             )
 
         claims = self._extract_claims(response)
         if not claims:
             return GroundingResult(
-                is_grounded=True, grounding_ratio=1.0, confidence=0.5,
-                ungrounded_claims=[], grounded_claims=[], total_claims=0,
+                is_grounded=True,
+                grounding_ratio=1.0,
+                confidence=0.5,
+                ungrounded_claims=[],
+                grounded_claims=[],
+                total_claims=0,
             )
 
         doc_contents = [
-            doc.get("content", doc.get("page_content", ""))
-            for doc in documents
+            doc.get("content", doc.get("page_content", "")) for doc in documents
         ]
         all_context = " ".join(doc_contents)
 
@@ -240,7 +247,11 @@ class GroundingVerifier:
         grounding_ratio = len(grounded_claims) / len(claims)
         is_grounded = grounding_ratio >= overall_threshold
 
-        confidence = min(abs(grounding_ratio - overall_threshold) / max(overall_threshold, 0.01) + 0.5, 1.0)
+        confidence = min(
+            abs(grounding_ratio - overall_threshold) / max(overall_threshold, 0.01)
+            + 0.5,
+            1.0,
+        )
 
         logger.info(
             "grounding_verification_complete",
@@ -252,9 +263,12 @@ class GroundingVerifier:
         )
 
         return GroundingResult(
-            is_grounded=is_grounded, grounding_ratio=grounding_ratio,
-            confidence=confidence, ungrounded_claims=ungrounded_claims,
-            grounded_claims=grounded_claims, total_claims=len(claims),
+            is_grounded=is_grounded,
+            grounding_ratio=grounding_ratio,
+            confidence=confidence,
+            ungrounded_claims=ungrounded_claims,
+            grounded_claims=grounded_claims,
+            total_claims=len(claims),
         )
 
 

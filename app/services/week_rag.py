@@ -4,16 +4,10 @@ from typing import Any, Dict, List, Optional
 
 
 def week_metadata_filter(max_week_index: Optional[int]) -> Optional[Dict[str, Any]]:
-    """When week cap is active, only chunks with numeric week_index <= cap (excludes pool-only ingest)."""
+    """When week cap is active, only chunks with numeric week_index <= cap."""
     if max_week_index is None:
         return None
-    return {
-        "$and": [
-            {"week_index": {"$exists": True}},
-            {"week_index": {"$ne": None}},
-            {"week_index": {"$lte": int(max_week_index)}},
-        ]
-    }
+    return {"week_index": {"$lte": int(max_week_index)}}
 
 
 def rank_week_boosted_results(
