@@ -430,7 +430,7 @@ class GoalValidator:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.7,
-                max_tokens=250,
+                max_tokens=400,
             )
 
             logger.info(
