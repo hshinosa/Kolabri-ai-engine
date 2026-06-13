@@ -417,7 +417,9 @@ class Orchestrator:
 
         is_valid = res.is_valid and not week_off_topic
         status = "accepted" if is_valid else "revise"
-        hint = self.goal_validator.generate_socratic_hint(res.missing_criteria)
+        hint = self.goal_validator.generate_socratic_hint(
+            res.missing_criteria, goal_text, week_context
+        )
         if week_off_topic:
             week_title = week_context.get("week_title", "minggu ini")
             mats = ", ".join((week_context.get("material_titles") or [])[:5])
