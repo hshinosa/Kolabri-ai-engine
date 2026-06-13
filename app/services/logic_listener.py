@@ -415,7 +415,19 @@ class LogicListener:
     def get_group_topic(self, group_id: str) -> Optional[str]:
         """Get the current topic for a group."""
         return self._group_topics.get(group_id)
-    
+
+    def get_group_status(self, group_id: str) -> Dict[str, Any]:
+        """Get current monitoring status for a group."""
+        participation = self._participation_counts.get(group_id, {})
+        gini_norm = (
+            self._calculate_normalized_gini(participation) if len(participation) >= 2 else 0.0
+        )
+        return {
+            "participation_gini": gini_norm,
+            "participant_count": len(participation),
+            "has_topic": group_id in self._group_topics,
+        }
+
     def _calculate_cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """
         Calculate cosine similarity between two vectors.
