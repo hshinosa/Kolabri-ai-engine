@@ -419,7 +419,7 @@ class Orchestrator:
         status = "accepted" if is_valid else "revise"
 
         hint: Optional[str] = None
-        if not is_valid and res.missing_criteria:
+        if not is_valid and (res.missing_criteria or week_off_topic):
             logger.info(
                 "attempting_llm_hint",
                 is_valid=is_valid,

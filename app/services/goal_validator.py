@@ -404,8 +404,14 @@ class GoalValidator:
                 ", ".join(material_titles[:5]) if material_titles else "belum ada"
             )
 
+            missing_str = (
+                ", ".join(missing_criteria)
+                if missing_criteria
+                else "tidak ada (goal sudah SMART)"
+            )
+
             system_prompt = SYSTEM_GOAL_HINT.format(
-                missing_criteria=", ".join(missing_criteria),
+                missing_criteria=missing_str,
                 week_title=week_title,
                 material_titles=mats_str,
                 goal_text=goal_text,
@@ -421,7 +427,7 @@ class GoalValidator:
 
             prompt = (
                 f'Goal mahasiswa: "{goal_text}"\n'
-                f"Kriteria yang kurang: {', '.join(missing_criteria)}"
+                f"Kriteria yang kurang: {missing_str}"
                 f"{off_topic_note}\n"
                 f"Berikan satu pertanyaan Socratic singkat untuk membimbingnya."
             )
