@@ -366,7 +366,7 @@ class Orchestrator:
                 overlap = sum(
                     1 for t in titles if t and t.lower()[:12] in goal_text.lower()
                 )
-                week_off_topic = overlap == 0 and res.is_valid
+                week_off_topic = overlap == 0
 
         async with self._state_lock:
             streak = self._group_smart_streak.get(chat_space_id, 0)
@@ -425,9 +425,10 @@ class Orchestrator:
                 is_valid=is_valid,
                 missing_criteria=res.missing_criteria,
                 has_week_context=week_context is not None,
+                week_off_topic=week_off_topic,
             )
             hint = await self.goal_validator.generate_llm_hint(
-                goal_text, res.missing_criteria, week_context
+                goal_text, res.missing_criteria, week_context, week_off_topic
             )
             logger.info(
                 "llm_hint_result",

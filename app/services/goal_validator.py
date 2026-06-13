@@ -384,6 +384,7 @@ class GoalValidator:
         goal_text: str,
         missing_criteria: List[str],
         week_context: Optional[Dict[str, Any]] = None,
+        week_off_topic: bool = False,
     ) -> Optional[str]:
         try:
             logger.info(
@@ -410,9 +411,18 @@ class GoalValidator:
                 goal_text=goal_text,
             )
 
+            off_topic_note = ""
+            if week_off_topic:
+                off_topic_note = (
+                    f"\n\nPENTING: Goal mahasiswa TIDAK SELARAS dengan materi minggu ini "
+                    f"({week_title}: {mats_str}). "
+                    f"Bimbing mahasiswa untuk menghubungkan goal dengan topik minggu ini."
+                )
+
             prompt = (
                 f'Goal mahasiswa: "{goal_text}"\n'
-                f"Kriteria yang kurang: {', '.join(missing_criteria)}\n"
+                f"Kriteria yang kurang: {', '.join(missing_criteria)}"
+                f"{off_topic_note}\n"
                 f"Berikan satu pertanyaan Socratic singkat untuk membimbingnya."
             )
 
