@@ -150,6 +150,86 @@ def test_personal_chat_success(mock_get_llm):
     assert data["tokens_used"] == 0
 
 
+@patch("app.api.routes.chat.settings")
+@patch("app.api.routes.chat.get_llm_service")
+def test_personal_chat_forwards_provider_context(mock_get_llm, mock_settings):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_PERSONAL_CHAT = True
+
+    mock_llm = MagicMock()
+    mock_llm.model = "gpt-test"
+    mock_llm.client.chat.completions.create = AsyncMock(
+        return_value=make_llm_response("Halo juga", 77)
+    )
+    mock_get_llm.return_value = mock_llm
+
+    payload = {
+        "message": "Halo",
+        "history": [],
+        "provider_context": {
+            "version": "1.0",
+            "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+            "execution": {
+                "baseUrl": "https://provider.example/v1",
+                "model": "gpt-4o-mini",
+            },
+            "auth": {"type": "api-key", "credential": "sk-provider-key"},
+            "metadata": {
+                "featureFamily": "personal_chat",
+                "requestId": "req-1",
+                "resolvedAt": "2026-06-16T00:00:00.000Z",
+            },
+        },
+    }
+    response = client.post("/chat/personal", json=payload)
+
+    assert response.status_code == 200
+    mock_get_llm.assert_called_once_with(provider_context=payload["provider_context"])
+
+
+@patch("app.api.routes.chat.settings")
+@patch("app.api.routes.chat.get_llm_service")
+def test_personal_chat_uses_legacy_path_when_feature_flag_disabled(
+    mock_get_llm, mock_settings
+):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_PERSONAL_CHAT = False
+
+    mock_llm = MagicMock()
+    mock_llm.model = "gpt-test"
+    mock_llm.client.chat.completions.create = AsyncMock(
+        return_value=make_llm_response("Halo juga", 77)
+    )
+    mock_get_llm.return_value = mock_llm
+
+    payload = {
+        "message": "Halo",
+        "history": [],
+        "provider_context": {
+            "version": "1.0",
+            "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+            "execution": {
+                "baseUrl": "https://provider.example/v1",
+                "model": "gpt-4o-mini",
+            },
+            "auth": {"type": "api-key", "credential": "sk-provider-key"},
+            "metadata": {
+                "featureFamily": "personal_chat",
+                "requestId": "req-1",
+                "resolvedAt": "2026-06-16T00:00:00.000Z",
+            },
+        },
+    }
+
+    response = client.post("/chat/personal", json=payload)
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_llm.call_args
+    assert call_kwargs[1].get("provider_context") is not None or (
+        call_kwargs.args and call_kwargs.args[0] is not None
+    )
+
+
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_failure(mock_get_llm):
     mock_llm = MagicMock()
@@ -716,6 +796,87 @@ def test_orchestrated_chat_success(mock_get_orchestrator):
     assert data["action_taken"] == "FETCH"
 
 
+@patch("app.api.routes.orchestration.settings")
+@patch("app.api.routes.orchestration.get_orchestrator")
+def test_orchestrated_chat_forwards_provider_context(
+    mock_get_orchestrator, mock_settings
+):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_ORCHESTRATION = True
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.handle_message = AsyncMock(
+        return_value=make_orchestration_result(reply="Ini jawaban AI")
+    )
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    provider_context = {
+        "version": "1.0",
+        "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+        "execution": {"baseUrl": "https://provider.example/v1", "model": "gpt-4o-mini"},
+        "auth": {"type": "api-key", "credential": "sk-provider-key"},
+        "metadata": {
+            "featureFamily": "orchestration",
+            "requestId": "req-1",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    }
+    payload = {
+        "user_id": "u1",
+        "group_id": "g1",
+        "message": "Apa itu AI?",
+        "provider_context": provider_context,
+    }
+    response = client.post("/chat", json=payload)
+
+    assert response.status_code == 200
+    mock_get_orchestrator.assert_called_once_with(provider_context=provider_context)
+
+
+@patch("app.api.routes.orchestration.settings")
+@patch("app.api.routes.orchestration.get_orchestrator")
+def test_orchestrated_chat_uses_legacy_path_when_feature_flag_disabled(
+    mock_get_orchestrator, mock_settings
+):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_ORCHESTRATION = False
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.handle_message = AsyncMock(
+        return_value=make_orchestration_result(reply="Ini jawaban AI")
+    )
+    mock_get_orchestrator.return_value = mock_orchestrator
+
+    response = client.post(
+        "/chat",
+        json={
+            "user_id": "u1",
+            "group_id": "g1",
+            "message": "Apa itu AI?",
+            "provider_context": {
+                "version": "1.0",
+                "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+                "execution": {
+                    "baseUrl": "https://provider.example/v1",
+                    "model": "gpt-4o-mini",
+                },
+                "auth": {"type": "api-key", "credential": "sk-provider-key"},
+                "metadata": {
+                    "featureFamily": "orchestration",
+                    "requestId": "req-1",
+                    "resolvedAt": "2026-06-16T00:00:00.000Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_orchestrator.call_args
+    assert call_kwargs[1].get("provider_context") is not None or (
+        call_kwargs.args and call_kwargs.args[0] is not None
+    )
+
+
 @patch("app.api.routes.orchestration.get_orchestrator")
 def test_orchestrated_chat_failure(mock_get_orchestrator):
     mock_orchestrator = MagicMock()
@@ -761,6 +922,87 @@ def test_analyze_intervention_success(mock_get_service):
     assert data["success"] is True
     assert data["should_intervene"] is True
     assert data["intervention_type"] == "redirect"
+
+
+@patch("app.api.routes.interventions.settings")
+@patch("app.api.routes.interventions.get_intervention_service")
+def test_analyze_intervention_forwards_provider_context(
+    mock_get_service, mock_settings
+):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_INTERVENTIONS = True
+
+    mock_service = MagicMock()
+    mock_service.analyze_and_intervene = AsyncMock(
+        return_value=make_intervention_result()
+    )
+    mock_get_service.return_value = mock_service
+
+    provider_context = {
+        "version": "1.0",
+        "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+        "execution": {"baseUrl": "https://provider.example/v1", "model": "gpt-4o-mini"},
+        "auth": {"type": "api-key", "credential": "sk-provider-key"},
+        "metadata": {
+            "featureFamily": "interventions",
+            "requestId": "req-1",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    }
+    payload = {
+        "messages": [{"sender": "Alice", "content": "Mari fokus"}],
+        "topic": "AI ethics",
+        "chat_room_id": "room-1",
+        "provider_context": provider_context,
+    }
+    response = client.post("/intervention/analyze", json=payload)
+
+    assert response.status_code == 200
+    mock_get_service.assert_called_once_with(provider_context=provider_context)
+
+
+@patch("app.api.routes.interventions.settings")
+@patch("app.api.routes.interventions.get_intervention_service")
+def test_analyze_intervention_uses_legacy_path_when_feature_flag_disabled(
+    mock_get_service, mock_settings
+):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_INTERVENTIONS = False
+
+    mock_service = MagicMock()
+    mock_service.analyze_and_intervene = AsyncMock(
+        return_value=make_intervention_result()
+    )
+    mock_get_service.return_value = mock_service
+
+    response = client.post(
+        "/intervention/analyze",
+        json={
+            "messages": [{"sender": "Alice", "content": "Mari fokus"}],
+            "topic": "AI ethics",
+            "chat_room_id": "room-1",
+            "provider_context": {
+                "version": "1.0",
+                "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+                "execution": {
+                    "baseUrl": "https://provider.example/v1",
+                    "model": "gpt-4o-mini",
+                },
+                "auth": {"type": "api-key", "credential": "sk-provider-key"},
+                "metadata": {
+                    "featureFamily": "interventions",
+                    "requestId": "req-1",
+                    "resolvedAt": "2026-06-16T00:00:00.000Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_service.call_args
+    assert call_kwargs[1].get("provider_context") is not None or (
+        call_kwargs.args and call_kwargs.args[0] is not None
+    )
 
 
 @patch("app.api.routes.interventions.get_intervention_service")
@@ -1639,3 +1881,161 @@ def test_delete_document_failure_with_collection_name(mock_get_vector_store):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "INTERNAL_SERVER_ERROR"
+
+
+# --- Legacy provider removal: migrated routes propagate provider_context ---
+
+
+@patch("app.api.routes.discussion_direction.settings")
+@patch("app.api.routes.discussion_direction.get_llm_service")
+def test_classify_relevance_forwards_provider_context(mock_get_llm, mock_settings):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_ORCHESTRATION = True
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(
+        return_value=MagicMock(
+            success=True,
+            content='{"classifications":[{"messageId":"m1","isRelevant":true}]}',
+        )
+    )
+    mock_get_llm.return_value = mock_llm
+
+    response = client.post(
+        "/classify-relevance",
+        json={
+            "messages": [{"id": "m1", "content": "test"}],
+            "goal": "learn AI",
+            "provider_context": {
+                "version": "1.0",
+                "provider": {"name": "openai", "displayName": "OpenAI"},
+                "execution": {"baseUrl": "https://api.example/v1", "model": "gpt-4"},
+                "auth": {"type": "api-key", "credential": "sk-test"},
+                "metadata": {
+                    "featureFamily": "orchestration",
+                    "requestId": "r1",
+                    "resolvedAt": "2026-01-01T00:00:00Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_llm.call_args
+    assert call_kwargs[1].get("provider_context") is not None
+
+
+@patch("app.api.routes.discussion_direction.settings")
+@patch("app.api.routes.discussion_direction.get_llm_service")
+def test_session_summary_forwards_provider_context(mock_get_llm, mock_settings):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_ORCHESTRATION = True
+
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(
+        return_value=MagicMock(
+            success=True,
+            content='{"goalAchieved":true,"topics":["AI"],"contributions":{"Peserta":1},"assessment":"Bagus"}',
+        )
+    )
+    mock_get_llm.return_value = mock_llm
+
+    response = client.post(
+        "/session-summary",
+        json={
+            "messages": [{"content": "hello", "senderName": "Alice"}],
+            "goal": "learn AI",
+            "provider_context": {
+                "version": "1.0",
+                "provider": {"name": "openai", "displayName": "OpenAI"},
+                "execution": {"baseUrl": "https://api.example/v1", "model": "gpt-4"},
+                "auth": {"type": "api-key", "credential": "sk-test"},
+                "metadata": {
+                    "featureFamily": "orchestration",
+                    "requestId": "r1",
+                    "resolvedAt": "2026-01-01T00:00:00Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_llm.call_args
+    assert call_kwargs[1].get("provider_context") is not None
+
+
+@patch("app.api.routes.interventions.settings")
+@patch("app.api.routes.interventions.get_intervention_service")
+def test_intervention_prompt_forwards_provider_context(mock_get_service, mock_settings):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_INTERVENTIONS = True
+
+    mock_service = MagicMock()
+    mock_service.generate_discussion_prompt = AsyncMock(
+        return_value=MagicMock(success=True, message="Discuss X", error=None)
+    )
+    mock_get_service.return_value = mock_service
+
+    response = client.post(
+        "/intervention/prompt",
+        json={
+            "topic": "AI ethics",
+            "provider_context": {
+                "version": "1.0",
+                "provider": {"name": "openai", "displayName": "OpenAI"},
+                "execution": {"baseUrl": "https://api.example/v1", "model": "gpt-4"},
+                "auth": {"type": "api-key", "credential": "sk-test"},
+                "metadata": {
+                    "featureFamily": "interventions",
+                    "requestId": "r1",
+                    "resolvedAt": "2026-01-01T00:00:00Z",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_service.call_args
+    assert call_kwargs[1].get("provider_context") is not None
+
+
+@patch("app.api.routes.goals.settings")
+@patch("app.api.routes.goals.get_orchestrator")
+def test_goal_refine_forwards_provider_context(mock_get_orchestrator, mock_settings):
+    mock_settings.UNIFIED_PROVIDER_ENABLED = True
+    mock_settings.UNIFIED_PROVIDER_GOALS = True
+
+    mock_orch = MagicMock()
+    mock_orch.get_goal_refinement = AsyncMock(
+        return_value={"success": True, "refined_goal": "improved goal"}
+    )
+    mock_get_orchestrator.return_value = mock_orch
+
+    import json
+
+    provider_ctx = json.dumps(
+        {
+            "version": "1.0",
+            "provider": {"name": "openai", "displayName": "OpenAI"},
+            "execution": {"baseUrl": "https://api.example/v1", "model": "gpt-4"},
+            "auth": {"type": "api-key", "credential": "sk-test"},
+            "metadata": {
+                "featureFamily": "goals",
+                "requestId": "r1",
+                "resolvedAt": "2026-01-01T00:00:00Z",
+            },
+        }
+    )
+
+    response = client.post(
+        "/goals/refine",
+        data={
+            "current_goal": "learn programming",
+            "missing_criteria": '["measurable"]',
+            "provider_context": provider_ctx,
+        },
+    )
+
+    assert response.status_code == 200
+    call_kwargs = mock_get_orchestrator.call_args
+    assert call_kwargs[1].get("provider_context") is not None

@@ -30,6 +30,8 @@ from app.utils.logger import get_process_mining_logger
 
 logger = get_logger(__name__)
 
+ProviderContext = Dict[str, Any]
+
 
 @dataclass
 class OrchestrationResult:
@@ -55,13 +57,19 @@ class OrchestrationResult:
 class Orchestrator:
     """Central orchestration service implementing Teacher-AI Complementarity."""
 
-    def __init__(self, **services):
-        self.rag = services.get("rag") or get_rag_pipeline()
+    def __init__(self, provider_context: Optional[ProviderContext] = None, **services):
+        self.rag = services.get("rag") or get_rag_pipeline(
+            provider_context=provider_context
+        )
         self.analyzer = services.get("analyzer") or get_engagement_analyzer()
-        self.intervention = services.get("intervention") or get_intervention_service()
+        self.intervention = services.get("intervention") or get_intervention_service(
+            provider_context=provider_context
+        )
         self.pm_logger = services.get("pm_logger") or get_process_mining_logger()
         self.mongo_logger = get_mongo_logger()
-        self.goal_validator = services.get("goal_validator") or get_goal_validator()
+        self.goal_validator = services.get("goal_validator") or get_goal_validator(
+            provider_context=provider_context
+        )
         self.logic_listener = services.get("logic_listener") or get_logic_listener()
         self.plan_vs_reality = get_plan_vs_reality_analyzer()
         self.anomaly_detector = get_anomaly_detector()
@@ -500,11 +508,14 @@ class Orchestrator:
         }
 
     async def get_goal_refinement(
-        self, current_goal: str, missing_criteria: List[str]
+        self,
+        current_goal: str,
+        missing_criteria: List[str],
+        provider_context: Optional[ProviderContext] = None,
     ) -> Dict[str, Any]:
         from app.services.llm import get_llm_service
 
-        llm = get_llm_service()
+        llm = get_llm_service(provider_context=provider_context)
         try:
             result = await llm.get_goal_refinement_suggestion(
                 current_goal, missing_criteria
@@ -704,7 +715,12 @@ class Orchestrator:
 _orchestrator = None
 
 
-def get_orchestrator() -> Orchestrator:
+def get_orchestrator(
+    provider_context: Optional[ProviderContext] = None,
+) -> Orchestrator:
+    if provider_context is not None:
+        return Orchestrator(provider_context=provider_context)
+
     global _orchestrator
     if _orchestrator is None:
         _orchestrator = Orchestrator()

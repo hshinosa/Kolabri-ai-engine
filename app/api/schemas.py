@@ -121,6 +121,37 @@ class QueryRequest(BaseModel):
         return v
 
 
+class ProviderIdentity(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    displayName: str = Field(..., min_length=1, max_length=128)
+
+
+class ProviderExecutionConfig(BaseModel):
+    baseUrl: str = Field(..., min_length=1, max_length=500)
+    model: str = Field(..., min_length=1, max_length=128)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    maxTokens: Optional[int] = Field(default=None, ge=1, le=100000)
+
+
+class ProviderAuthConfig(BaseModel):
+    type: str = Field(..., pattern="^(api-key|bearer)$")
+    credential: str = Field(..., min_length=1, max_length=10000)
+
+
+class ProviderMetadata(BaseModel):
+    featureFamily: str = Field(..., min_length=1, max_length=64)
+    requestId: str = Field(..., min_length=1, max_length=128)
+    resolvedAt: str = Field(..., min_length=1, max_length=64)
+
+
+class ProviderContextV1(BaseModel):
+    version: str = Field(..., pattern=r"^1\.0$")
+    provider: ProviderIdentity
+    execution: ProviderExecutionConfig
+    auth: ProviderAuthConfig
+    metadata: ProviderMetadata
+
+
 class AskRequest(BaseModel):
     """Request for /ask endpoint (Core-API integration)."""
 
@@ -130,6 +161,7 @@ class AskRequest(BaseModel):
     chat_space_id: Optional[str] = Field(None, max_length=64)
     guardrail_policy: Optional[dict[str, Any]] = None
     scaffolding_config: Optional[dict[str, Any]] = None
+    provider_context: Optional[ProviderContextV1] = None
 
     @field_validator("course_id", "chat_space_id")
     @classmethod
@@ -153,6 +185,7 @@ class ReadingRecommendationRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
     course_id: str = Field(..., min_length=1, max_length=64)
     limit: int = Field(default=3, ge=1, le=5)
+    provider_context: Optional[ProviderContextV1] = None
 
     @field_validator("course_id")
     @classmethod
@@ -224,6 +257,7 @@ class InterventionRequest(BaseModel):
     chat_room_id: str
     intervention_type: Optional[str] = None  # redirect, prompt, summarize
     force: bool = False  # Force intervention even if not needed
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class InterventionResponse(BaseModel):
@@ -244,6 +278,7 @@ class SummaryRequest(BaseModel):
     messages: List[ChatMessage]
     chat_room_id: str
     include_action_items: bool = True
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class SummaryResponse(BaseModel):
@@ -256,11 +291,10 @@ class SummaryResponse(BaseModel):
 
 
 class PromptRequest(BaseModel):
-    """Request for discussion prompt generation."""
-
     topic: str
     context: Optional[str] = None
     difficulty: str = Field(default="medium", pattern="^(easy|medium|hard)$")
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class PromptResponse(BaseModel):
@@ -339,6 +373,7 @@ class OrchestrationRequest(BaseModel):
     max_week_index: Optional[int] = Field(None, ge=1)
     week_context: Optional[dict[str, Any]] = None
     chat_history: Optional[List[ChatHistoryItem]] = Field(None, max_length=20)
+    provider_context: Optional[ProviderContextV1] = None
 
     @field_validator(
         "user_id", "group_id", "course_id", "chat_room_id", "collection_name"
@@ -395,6 +430,7 @@ class EngagementAnalysisRequest(BaseModel):
     """Request for text engagement analysis."""
 
     text: str = Field(..., min_length=1, max_length=10000)
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class EngagementAnalysisResponse(BaseModel):
@@ -455,11 +491,19 @@ class PersonalChatMessage(BaseModel):
 
 
 class PersonalChatRequest(BaseModel):
-    """Request for personal AI chat (multi-turn, no RAG)."""
+    """Request for personal AI chat with optional RAG across enrolled courses."""
 
     message: str = Field(..., min_length=1, max_length=10000)
     history: List[PersonalChatMessage] = Field(default_factory=list, max_length=50)
     user_name: Optional[str] = None
+    course_ids: Optional[List[str]] = Field(default=None, max_length=20)
+    provider_context: Optional[ProviderContextV1] = None
+
+
+class PersonalChatCitation(BaseModel):
+    source: str
+    page: Optional[int] = None
+    snippet: Optional[str] = None
 
 
 class PersonalChatResponse(BaseModel):
@@ -468,6 +512,7 @@ class PersonalChatResponse(BaseModel):
     reply: str
     success: bool = True
     tokens_used: int = 0
+    citations: List[PersonalChatCitation] = Field(default_factory=list)
     error: Optional[str] = None
 
 

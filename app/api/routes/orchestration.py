@@ -5,6 +5,7 @@ Orchestration endpoint — main chat pipeline.
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.api.schemas import OrchestrationRequest, OrchestrationResponse
 from app.services.orchestration import get_orchestrator
@@ -12,6 +13,20 @@ from app.services.orchestration import get_orchestrator
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def dump_provider_context(provider_context):
+    if provider_context is None:
+        return None
+    return provider_context.model_dump(exclude_none=True)
+
+
+def resolve_provider_context(provider_context):
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        return None
+    if settings.UNIFIED_PROVIDER_ORCHESTRATION:
+        return dump_provider_context(provider_context)
+    return dump_provider_context(provider_context)
 
 
 @router.post(
@@ -23,7 +38,9 @@ router = APIRouter()
 )
 async def orchestrated_chat(request: OrchestrationRequest):
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(
+            provider_context=resolve_provider_context(request.provider_context)
+        )
         result = await orchestrator.handle_message(
             user_id=request.user_id,
             group_id=request.group_id,

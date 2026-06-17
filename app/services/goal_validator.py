@@ -158,8 +158,8 @@ class GoalValidator:
         "goal",
     ]
 
-    def __init__(self):
-        """Initialize GoalValidator"""
+    def __init__(self, provider_context: Optional[Dict[str, Any]] = None):
+        self._provider_context = provider_context
         logger.info("GoalValidator initialized")
 
     def is_goal_statement(self, text: str) -> bool:
@@ -397,9 +397,8 @@ class GoalValidator:
             from app.services.llm import get_llm_service
             from app.core.prompt_templates import SYSTEM_GOAL_HINT
 
-            llm = get_llm_service()
+            llm = get_llm_service(provider_context=self._provider_context)
             week_title = (week_context or {}).get("week_title", "topik minggu ini")
-            material_titles = (week_context or {}).get("material_titles") or []
             mats_str = (
                 ", ".join(material_titles[:5]) if material_titles else "belum ada"
             )
@@ -489,7 +488,7 @@ class GoalValidator:
                 TEMPERATURE,
             )
 
-            llm = get_llm_service()
+            llm = get_llm_service(provider_context=self._provider_context)
 
             prompt = COT_GOAL_REFINEMENT.format(
                 current_goal=current_goal, missing_criteria=", ".join(missing_criteria)
@@ -716,13 +715,12 @@ class GoalValidator:
 _goal_validator: Optional[GoalValidator] = None
 
 
-def get_goal_validator() -> GoalValidator:
-    """
-    Get singleton instance of GoalValidator.
+def get_goal_validator(
+    provider_context: Optional[Dict[str, Any]] = None,
+) -> GoalValidator:
+    if provider_context is not None:
+        return GoalValidator(provider_context=provider_context)
 
-    Returns:
-        GoalValidator instance
-    """
     global _goal_validator
     if _goal_validator is None:
         _goal_validator = GoalValidator()

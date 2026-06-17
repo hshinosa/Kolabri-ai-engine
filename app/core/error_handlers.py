@@ -9,6 +9,7 @@ from starlette.responses import Response
 
 from app.core.logging import get_logger
 from app.middleware.request_id import REQUEST_ID_HEADER
+from app.utils.sensitive_data import sanitize_error_message
 
 logger = get_logger(__name__)
 
@@ -21,7 +22,9 @@ def _request_id_for(request: Request) -> str:
 
 
 class ExceptionMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         try:
             return await call_next(request)
         except StarletteHTTPException:
@@ -34,7 +37,9 @@ class ExceptionMiddleware(BaseHTTPMiddleware):
             return await unhandled_exception_handler(request, exc)
 
 
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
     request_id = _request_id_for(request)
     logger.warning(
         "HTTP exception",
@@ -57,7 +62,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     )
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
     request_id = _request_id_for(request)
     logger.warning(
         "Validation error",
@@ -82,9 +89,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     except Exception:
         request_id = str(_uuid.uuid4())
     try:
-        logger.exception(
+        logger.error(
             "unhandled_exception",
             error_type=type(exc).__name__,
+            error=sanitize_error_message(str(exc)),
             path=str(request.url.path),
             method=request.method,
             request_id=request_id,

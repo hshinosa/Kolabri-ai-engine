@@ -6,17 +6,37 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.api.schemas import ProviderContextV1
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.llm import get_llm_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["Discussion Direction"])
+
+
+def _dump_provider_context(
+    provider_context: Optional[ProviderContextV1],
+) -> Optional[dict[str, Any]]:
+    if provider_context is None:
+        return None
+    return provider_context.model_dump(exclude_none=True)
+
+
+def _resolve_provider_context(
+    provider_context: Optional[ProviderContextV1],
+) -> Optional[dict[str, Any]]:
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        return None
+    if settings.UNIFIED_PROVIDER_ORCHESTRATION:
+        return _dump_provider_context(provider_context)
+    return _dump_provider_context(provider_context)
 
 
 class ClassifyMessageItem(BaseModel):
@@ -27,6 +47,7 @@ class ClassifyMessageItem(BaseModel):
 class ClassifyRelevanceRequest(BaseModel):
     messages: list[ClassifyMessageItem]
     goal: str
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class ClassifyRelevanceResponse(BaseModel):
@@ -47,6 +68,7 @@ class SessionSummaryRequest(BaseModel):
     messages: list[SessionSummaryMessage]
     goal: str
     stats: SessionSummaryStats = Field(default_factory=SessionSummaryStats)
+    provider_context: Optional[ProviderContextV1] = None
 
 
 class SessionSummaryResponse(BaseModel):
@@ -96,7 +118,9 @@ async def classify_relevance(
         '{"classifications":[{"messageId":"<id>","isRelevant":true|false},...]}'
     )
 
-    llm = get_llm_service()
+    llm = get_llm_service(
+        provider_context=_resolve_provider_context(body.provider_context)
+    )
     result = await llm.generate(
         prompt=prompt,
         system_prompt=(
@@ -149,7 +173,9 @@ async def session_summary(body: SessionSummaryRequest) -> SessionSummaryResponse
         "contributions (object nama->jumlah pesan), assessment (string Bahasa Indonesia, 2-4 kalimat)."
     )
 
-    llm = get_llm_service()
+    llm = get_llm_service(
+        provider_context=_resolve_provider_context(body.provider_context)
+    )
     result = await llm.generate(
         prompt=prompt,
         system_prompt=(

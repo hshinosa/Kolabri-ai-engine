@@ -171,6 +171,15 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_READ_SECONDS: float = 90.0
     LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS: int = 30
 
+    UNIFIED_PROVIDER_ENABLED: bool = False
+    UNIFIED_PROVIDER_PERSONAL_CHAT: bool = False
+    UNIFIED_PROVIDER_ORCHESTRATION: bool = False
+    UNIFIED_PROVIDER_INTERVENTIONS: bool = False
+    UNIFIED_PROVIDER_SUMMARIES: bool = False
+    UNIFIED_PROVIDER_GOALS: bool = False
+    UNIFIED_PROVIDER_RAG: bool = False
+    UNIFIED_PROVIDER_ANALYTICS: bool = False
+
     @model_validator(mode="after")
     def validate_security_secrets(self) -> "Settings":
         """
@@ -180,11 +189,12 @@ class Settings(BaseSettings):
         if self.ENV == "production":
             errors = []
 
-            # Check API keys
-            if not self.OPENAI_API_KEY or self.OPENAI_API_KEY == "sk-kolabri":
-                errors.append(
-                    "OPENAI_API_KEY (must be set via environment, not hardcoded)"
-                )
+            # Check API keys (skip when unified provider is the source of truth)
+            if not self.UNIFIED_PROVIDER_ENABLED:
+                if not self.OPENAI_API_KEY or self.OPENAI_API_KEY == "sk-kolabri":
+                    errors.append(
+                        "OPENAI_API_KEY (must be set via environment, not hardcoded)"
+                    )
 
             # ✅ SEC: Reject default/weak secrets
             if not self.CORE_API_SECRET:
@@ -199,11 +209,11 @@ class Settings(BaseSettings):
                     "CORE_API_SECRET menggunakan nilai default yang lemah. Harap gunakan secret yang kuat."
                 )
 
-            # Check for weak API keys (< 20 chars is suspiciously short)
-            if self.OPENAI_API_KEY and len(self.OPENAI_API_KEY) < 20:
-                errors.append(
-                    "OPENAI_API_KEY terlalu pendek, kemungkinan tidak valid atau lemah"
-                )
+            if not self.UNIFIED_PROVIDER_ENABLED:
+                if self.OPENAI_API_KEY and len(self.OPENAI_API_KEY) < 20:
+                    errors.append(
+                        "OPENAI_API_KEY terlalu pendek, kemungkinan tidak valid atau lemah"
+                    )
 
             # ✅ SEC: KOL-146 - Validate HTTPS for production URLs
             if self.OPENAI_BASE_URL.startswith("http://"):

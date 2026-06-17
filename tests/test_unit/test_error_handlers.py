@@ -83,6 +83,17 @@ async def test_unhandled_exception_handler():
 
 
 @pytest.mark.asyncio
+async def test_unhandled_exception_handler_redacts_credentials():
+    req = _request()
+    with patch("app.core.error_handlers.logger.error") as logger_error:
+        await unhandled_exception_handler(
+            req, RuntimeError("provider sk-secret-123 failed")
+        )
+    logger_error.assert_called_once()
+    assert logger_error.call_args.kwargs["error"] == "provider [REDACTED]"
+
+
+@pytest.mark.asyncio
 async def test_unhandled_exception_request_id_fallback(monkeypatch):
     req = _request()
 
@@ -94,7 +105,7 @@ async def test_unhandled_exception_request_id_fallback(monkeypatch):
         _boom,
     )
     with patch(
-        "app.core.error_handlers.logger.exception", side_effect=RuntimeError("log fail")
+        "app.core.error_handlers.logger.error", side_effect=RuntimeError("log fail")
     ):
         resp = await unhandled_exception_handler(req, ValueError("inner"))
     assert resp.status_code == 500

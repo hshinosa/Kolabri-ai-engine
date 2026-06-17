@@ -27,6 +27,8 @@ from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
 
 logger = get_logger(__name__)
 
+ProviderContext = Dict[str, Any]
+
 
 @dataclass
 class RAGResult:
@@ -100,6 +102,7 @@ class RAGPipeline:
         efficiency_guard: Optional[EfficiencyGuard] = None,
         reranker: Optional[CrossEncoderReranker] = None,
         quality_controls: Optional[RetrievalQualityControls] = None,
+        provider_context: Optional[ProviderContext] = None,
     ):
         """
         Initialize RAG pipeline.
@@ -110,7 +113,9 @@ class RAGPipeline:
             efficiency_guard: Efficiency guard for caching and optimization
         """
         self.vector_store = vector_store or get_vector_store()
-        self.llm_service = llm_service or get_llm_service()
+        self.llm_service = llm_service or get_llm_service(
+            provider_context=provider_context
+        )
         self.guardrails = get_guardrails()
         self.quality_controls = (
             quality_controls or RetrievalQualityControls.from_settings()
@@ -747,8 +752,11 @@ JAWABAN (sintesis dari semua sumber yang relevan):"""
 _rag_pipeline: Optional[RAGPipeline] = None
 
 
-def get_rag_pipeline() -> RAGPipeline:
+def get_rag_pipeline(provider_context: Optional[ProviderContext] = None) -> RAGPipeline:
     """Get or create the RAG pipeline singleton."""
+    if provider_context is not None:
+        return RAGPipeline(provider_context=provider_context)
+
     global _rag_pipeline
     if _rag_pipeline is None:
         _rag_pipeline = RAGPipeline()

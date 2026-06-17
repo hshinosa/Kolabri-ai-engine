@@ -2,12 +2,14 @@
 Analytics, dashboard & CSV export endpoints.
 """
 
+import json
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import JSONResponse, Response
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis_cache import get_redis_cache, CACHE_TTL
 from app.api.schemas import (
@@ -25,6 +27,17 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 _SAFE_ID_REGEX = r"^[a-zA-Z0-9_-]{1,64}$"
+
+
+def _resolve_provider_context_query(raw: Optional[str]) -> Optional[dict]:
+    if not raw:
+        return None
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def _safe_csv_filename(prefix: str, identifier: str) -> str:
@@ -84,7 +97,12 @@ async def analyze_engagement(request: EngagementAnalysisRequest):
     tags=["Analytics"],
     summary="Get dashboard data for a GROUP (Collaboration & Dynamics)",
 )
-async def get_group_dashboard(group_id: str):
+async def get_group_dashboard(
+    group_id: str,
+    provider_context: Optional[str] = Query(
+        None, description="JSON-encoded provider context"
+    ),
+):
     try:
         redis_cache = await get_redis_cache()
         cache_key = redis_cache.generate_key("analytics", "group_dashboard", group_id)
@@ -92,7 +110,9 @@ async def get_group_dashboard(group_id: str):
         if cached is not None:
             return JSONResponse(content=cached)
 
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(
+            provider_context=_resolve_provider_context_query(provider_context)
+        )
         data = await orchestrator.get_group_dashboard_data(group_id)
         await redis_cache.set(cache_key, data, ttl=CACHE_TTL["analytics"])
         return JSONResponse(content=data)
@@ -106,7 +126,12 @@ async def get_group_dashboard(group_id: str):
     tags=["Analytics"],
     summary="Get dashboard data for an INDIVIDUAL student",
 )
-async def get_individual_dashboard(user_id: str):
+async def get_individual_dashboard(
+    user_id: str,
+    provider_context: Optional[str] = Query(
+        None, description="JSON-encoded provider context"
+    ),
+):
     try:
         redis_cache = await get_redis_cache()
         cache_key = redis_cache.generate_key(
@@ -116,7 +141,9 @@ async def get_individual_dashboard(user_id: str):
         if cached is not None:
             return JSONResponse(content=cached)
 
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(
+            provider_context=_resolve_provider_context_query(provider_context)
+        )
         data = await orchestrator.get_individual_dashboard_data(user_id)
         await redis_cache.set(cache_key, data, ttl=CACHE_TTL["analytics"])
         return JSONResponse(content=data)
@@ -239,9 +266,16 @@ async def export_process_mining_csv(
     tags=["Analytics"],
     summary="Get group analytics (alias)",
 )
-async def get_group_analytics_alias(group_id: str):
+async def get_group_analytics_alias(
+    group_id: str,
+    provider_context: Optional[str] = Query(
+        None, description="JSON-encoded provider context"
+    ),
+):
     try:
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(
+            provider_context=_resolve_provider_context_query(provider_context)
+        )
         data = await orchestrator.get_group_dashboard_data(group_id)
 
         return GroupAnalyticsResponse(

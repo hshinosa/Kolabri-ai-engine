@@ -39,7 +39,41 @@ from app.api.schemas import (
     ProcessMiningExportResponse,
     GuardrailCheckRequest,
     GuardrailCheckResponse,
+    PersonalChatRequest,
+    ProviderContextV1,
 )
+
+
+def build_provider_context() -> ProviderContextV1:
+    return ProviderContextV1(
+        version="1.0",
+        provider={"name": "openai", "displayName": "OpenAI GPT"},
+        execution={
+            "baseUrl": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+            "temperature": 0.4,
+            "maxTokens": 1024,
+        },
+        auth={"type": "api-key", "credential": "sk-test-credential"},
+        metadata={
+            "featureFamily": "orchestration",
+            "requestId": "req-123",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    )
+
+
+class TestProviderContextV1:
+    def test_provider_context_valid(self):
+        context = build_provider_context()
+        assert context.version == "1.0"
+        assert context.provider.name == "openai"
+
+    def test_provider_context_invalid_version(self):
+        payload = build_provider_context().model_dump()
+        payload["version"] = "2.0"
+        with pytest.raises(ValidationError):
+            ProviderContextV1(**payload)
 
 
 class TestHealthResponse:
@@ -227,11 +261,28 @@ class TestAskRequest:
         with pytest.raises(ValidationError):
             AskRequest(query="q", course_id="..\\x", chat_space_id=None)
 
+    def test_ask_request_accepts_provider_context(self):
+        request = AskRequest(
+            query="Explain quantum physics",
+            course_id="course_1",
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
+        assert request.provider_context.provider.name == "openai"
+
 
 class TestReadingRecommendationRequest:
     def test_reading_recommendation_rejects_path_traversal(self):
         with pytest.raises(ValidationError):
             ReadingRecommendationRequest(topic="t", course_id="/bad")
+
+    def test_reading_recommendation_accepts_provider_context(self):
+        request = ReadingRecommendationRequest(
+            topic="transformer",
+            course_id="course_1",
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
 
 
 class TestAskResponse:
@@ -306,6 +357,16 @@ class TestInterventionRequest:
         assert len(request.messages) == 1
         assert request.topic == "Machine Learning"
 
+    def test_intervention_request_accepts_provider_context(self):
+        msg = ChatMessage(sender="John", content="Hello")
+        request = InterventionRequest(
+            messages=[msg],
+            topic="Machine Learning",
+            chat_room_id="room_1",
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
+
 
 class TestInterventionResponse:
     """Test InterventionResponse schema."""
@@ -334,6 +395,15 @@ class TestSummaryRequest:
             messages=[msg], chat_room_id="room_1", include_action_items=True
         )
         assert request.include_action_items is True
+
+    def test_summary_request_accepts_provider_context(self):
+        msg = ChatMessage(sender="John", content="Discussion")
+        request = SummaryRequest(
+            messages=[msg],
+            chat_room_id="room_1",
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
 
 
 class TestSummaryResponse:
@@ -452,6 +522,15 @@ class TestOrchestrationRequest:
         assert request.user_id == "user_123"
         assert request.group_id == "group_1"
 
+    def test_orchestration_request_accepts_provider_context(self):
+        request = OrchestrationRequest(
+            user_id="user_123",
+            group_id="group_1",
+            message="What is machine learning?",
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
+
     def test_orchestration_request_rejects_path_traversal(self):
         with pytest.raises(ValidationError):
             OrchestrationRequest(
@@ -460,6 +539,16 @@ class TestOrchestrationRequest:
                 message="hi",
                 collection_name="../c",
             )
+
+
+class TestPersonalChatRequest:
+    def test_personal_chat_request_accepts_provider_context(self):
+        request = PersonalChatRequest(
+            message="Halo",
+            history=[],
+            provider_context=build_provider_context(),
+        )
+        assert request.provider_context is not None
 
 
 class TestOrchestrationResponse:

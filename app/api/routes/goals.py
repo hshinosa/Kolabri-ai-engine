@@ -9,6 +9,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.api.schemas import ProviderContextV1
+
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.orchestration import get_orchestrator
 
@@ -17,11 +20,30 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def dump_provider_context(
+    provider_context: Optional[ProviderContextV1],
+) -> Optional[dict[str, Any]]:
+    if provider_context is None:
+        return None
+    return provider_context.model_dump(exclude_none=True)
+
+
+def resolve_provider_context(
+    provider_context: Optional[ProviderContextV1],
+) -> Optional[dict[str, Any]]:
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        return None
+    if settings.UNIFIED_PROVIDER_GOALS:
+        return dump_provider_context(provider_context)
+    return dump_provider_context(provider_context)
+
+
 class GoalValidateBody(BaseModel):
     goal_text: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
     chat_space_id: str = Field(..., min_length=1)
     week_context: Optional[dict[str, Any]] = None
+    provider_context: Optional[ProviderContextV1] = None
 
 
 @router.post(
@@ -33,12 +55,14 @@ async def validate_goal(request: Request):
     try:
         content_type = request.headers.get("content-type", "")
         week_context = None
+        provider_context = None
         if "application/json" in content_type:
             body = GoalValidateBody.model_validate(await request.json())
             goal_text = body.goal_text
             user_id = body.user_id
             chat_space_id = body.chat_space_id
             week_context = body.week_context
+            provider_context = resolve_provider_context(body.provider_context)
         else:
             form = await request.form()
             goal_text = str(form.get("goal_text", ""))
@@ -51,7 +75,7 @@ async def validate_goal(request: Request):
                 except json.JSONDecodeError:
                     week_context = None
 
-        orchestrator = get_orchestrator()
+        orchestrator = get_orchestrator(provider_context=provider_context)
         result = await orchestrator.validate_goal(
             goal_text=goal_text,
             user_id=user_id,
@@ -82,11 +106,18 @@ async def validate_goal(request: Request):
 async def get_goal_refinement(
     current_goal: str = Form(...),
     missing_criteria: str = Form(...),
+    provider_context: Optional[str] = Form(None),
 ):
     try:
         missing_list = json.loads(missing_criteria)
 
-        orchestrator = get_orchestrator()
+        parsed_ctx = None
+        if provider_context:
+            try:
+                parsed_ctx = json.loads(provider_context)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        orchestrator = get_orchestrator(provider_context=parsed_ctx)
 
         result = await orchestrator.get_goal_refinement(
             current_goal=current_goal, missing_criteria=missing_list

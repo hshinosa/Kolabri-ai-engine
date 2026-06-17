@@ -122,11 +122,10 @@ async def lifespan(app: FastAPI):
     mongo_logger = get_mongo_logger()
     await mongo_logger.connect()
 
-    # Warm up safety and orchestration services so the enriched TA flow
-    # is ready before the first request arrives.
     get_logic_listener()
     get_notification_service()
-    get_rag_pipeline()
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        get_rag_pipeline()
     ConformanceChecker()
 
     # Initialize rate limiter (truly lazy - only runs at app startup)

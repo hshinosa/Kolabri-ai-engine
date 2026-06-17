@@ -130,8 +130,8 @@ class DocumentProcessor:
     # Parallel processing settings
     MAX_PARALLEL_FILES = 1  # Process sequentially to reduce peak memory
 
-    def __init__(self):
-        """Initialize document processor."""
+    def __init__(self, provider_context: Optional[Dict[str, Any]] = None):
+        self._provider_context = provider_context
         self.chunk_size = settings.CHUNK_SIZE
         self.chunk_overlap = settings.CHUNK_OVERLAP
         self.max_file_size = settings.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -153,14 +153,22 @@ class DocumentProcessor:
 
             self._ocr_engine = initialize_ocr_engine()
 
-        if self.vision_available and settings.OPENAI_API_KEY:
-            from openai import OpenAI
+        if self.vision_available:
+            auth = (self._provider_context or {}).get("auth", {})
+            execution = (self._provider_context or {}).get("execution", {})
+            api_key = auth.get("credential")
+            base_url = execution.get("baseUrl")
+            if api_key and base_url:
+                from openai import OpenAI
 
-            self._vision_client = OpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                base_url=settings.OPENAI_BASE_URL,
-            )
-            logger.info("OpenAI Vision initialized", model=settings.OPENAI_MODEL)
+                self._vision_client = OpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                )
+                logger.info(
+                    "OpenAI Vision initialized",
+                    model=execution.get("model"),
+                )
         elif settings.ENABLE_OCR:
             if OCR_IMPORT_ERROR:
                 logger.warning(
@@ -168,7 +176,7 @@ class DocumentProcessor:
                     reason=OCR_IMPORT_ERROR,
                 )
             else:
-                logger.warning("OCR enabled but PaddleOCR is not installed")
+                logger.info("OCR fallback (PaddleOCR) available")
         else:
             logger.info("OCR disabled via configuration")
 
@@ -901,8 +909,12 @@ class DocumentProcessor:
 _document_processor: Optional[DocumentProcessor] = None
 
 
-def get_document_processor() -> DocumentProcessor:
-    """Get or create the document processor singleton."""
+def get_document_processor(
+    provider_context: Optional[Dict[str, Any]] = None,
+) -> DocumentProcessor:
+    if provider_context is not None:
+        return DocumentProcessor(provider_context=provider_context)
+
     global _document_processor
     if _document_processor is None:
         _document_processor = DocumentProcessor()

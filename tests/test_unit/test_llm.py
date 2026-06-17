@@ -17,6 +17,7 @@ from app.services.llm import (
     OpenAILLMService,
     LLMResponse,
     ChatMessage,
+    get_llm_service,
 )
 
 
@@ -68,6 +69,80 @@ def test_llm_initialization(llm_service):
     service, _ = llm_service
     assert service.model == "test-model"
     assert settings.LLM_MAX_RETRIES == 3
+
+
+def test_llm_initialization_uses_provider_context_over_env():
+    provider_context = {
+        "version": "1.0",
+        "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+        "execution": {
+            "baseUrl": "https://provider.example/v1",
+            "model": "gpt-4o-mini",
+            "temperature": 0.25,
+            "maxTokens": 2048,
+        },
+        "auth": {"type": "api-key", "credential": "sk-provider-key"},
+        "metadata": {
+            "featureFamily": "personal_chat",
+            "requestId": "req-1",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    }
+
+    with (
+        patch("app.services.llm.httpx.AsyncClient"),
+        patch("app.services.llm.settings") as mock_settings,
+        patch("app.services.llm.AsyncOpenAI") as mock_openai,
+    ):
+        mock_settings.OPENAI_API_KEY = "env-key"
+        mock_settings.OPENAI_BASE_URL = "https://env.example/v1"
+        mock_settings.OPENAI_MODEL = "env-model"
+        mock_settings.OPENAI_TEMPERATURE = 0.7
+        mock_settings.OPENAI_MAX_TOKENS = 1000
+
+        service = OpenAILLMService(provider_context=provider_context)
+
+        assert service.model == "gpt-4o-mini"
+        assert service.temperature == 0.25
+        assert service.max_tokens == 2048
+        mock_openai.assert_called_once()
+        call_kwargs = mock_openai.call_args.kwargs
+        assert call_kwargs["api_key"] == "sk-provider-key"
+        assert call_kwargs["base_url"] == "https://provider.example/v1"
+
+
+def test_get_llm_service_returns_request_scoped_instance_for_provider_context():
+    provider_context = {
+        "version": "1.0",
+        "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+        "execution": {
+            "baseUrl": "https://provider.example/v1",
+            "model": "gpt-4o-mini",
+        },
+        "auth": {"type": "api-key", "credential": "sk-provider-key"},
+        "metadata": {
+            "featureFamily": "orchestration",
+            "requestId": "req-1",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    }
+
+    with (
+        patch("app.services.llm.httpx.AsyncClient"),
+        patch("app.services.llm.settings") as mock_settings,
+        patch("app.services.llm.AsyncOpenAI"),
+        patch("app.services.llm._llm_service", new=object()),
+    ):
+        mock_settings.OPENAI_API_KEY = "env-key"
+        mock_settings.OPENAI_BASE_URL = "https://env.example/v1"
+        mock_settings.OPENAI_MODEL = "env-model"
+        mock_settings.OPENAI_TEMPERATURE = 0.7
+        mock_settings.OPENAI_MAX_TOKENS = 1000
+
+        service = get_llm_service(provider_context=provider_context)
+
+        assert isinstance(service, OpenAILLMService)
+        assert service.model == "gpt-4o-mini"
 
 
 # ==============================================================================
@@ -137,7 +212,10 @@ async def test_generate_with_context(llm_service):
     # Verify context was included
     messages = mock_client.chat.completions.create.call_args[1]["messages"]
     assert any(
-        m["role"] == "system" and "Konteks tambahan:" in m["content"] and "X is a variable" in m["content"] for m in messages
+        m["role"] == "system"
+        and "Konteks tambahan:" in m["content"]
+        and "X is a variable" in m["content"]
+        for m in messages
     )
 
 
@@ -343,7 +421,9 @@ async def test_rag_response_uses_cot_template(llm_service):
     service, mock_client = llm_service
 
     result = await service.generate_rag_response(
-        query="Apa itu gradient descent?", contexts=[{"content": "test", "metadata": {"source": "doc.pdf"}}], fading_level=0.0
+        query="Apa itu gradient descent?",
+        contexts=[{"content": "test", "metadata": {"source": "doc.pdf"}}],
+        fading_level=0.0,
     )
 
     assert result.success is True
@@ -377,8 +457,7 @@ async def test_rag_response_with_fading_socratic(llm_service):
     # Check for Socratic questioning instruction
     prompt = mock_client.chat.completions.create.call_args[1]["messages"][-1]["content"]
     assert any(
-        keyword in prompt.lower()
-        for keyword in ["socratic", "pemandu", "membimbing"]
+        keyword in prompt.lower() for keyword in ["socratic", "pemandu", "membimbing"]
     )
 
 
@@ -634,3 +713,29 @@ async def test_generate_with_empty_choices(llm_service):
 
     # Should succeed with valid choices
     assert result.success is True
+
+
+def test_get_llm_service_raises_without_provider_context_when_unified_enabled():
+    with patch("app.services.llm.settings") as mock_settings:
+        mock_settings.UNIFIED_PROVIDER_ENABLED = True
+        with pytest.raises(ValueError, match="provider_context is required"):
+            get_llm_service()
+
+
+def test_get_llm_service_returns_instance_when_unified_disabled():
+    with patch("app.services.llm.settings") as mock_settings:
+        mock_settings.UNIFIED_PROVIDER_ENABLED = False
+        mock_settings.OPENAI_API_KEY = "sk-test-key-12345678901234567890"
+        mock_settings.OPENAI_BASE_URL = "https://api.openai.com/v1"
+        mock_settings.OPENAI_MODEL = "gpt-4"
+        mock_settings.OPENAI_TEMPERATURE = 0.7
+        mock_settings.OPENAI_MAX_TOKENS = 2048
+        mock_settings.LLM_MAX_RETRIES = 0
+        mock_settings.LLM_TIMEOUT_CONNECT_SECONDS = 5.0
+        mock_settings.LLM_TIMEOUT_READ_SECONDS = 30.0
+        import app.services.llm as llm_module
+
+        llm_module._llm_service = None
+        result = get_llm_service()
+        assert result is not None
+        llm_module._llm_service = None

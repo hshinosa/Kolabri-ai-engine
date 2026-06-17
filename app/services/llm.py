@@ -10,6 +10,7 @@ from tenacity import (
 )
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.utils.sensitive_data import sanitize_error_message
 from app.core.prompt_templates import (
     SYSTEM_RAG,
     SYSTEM_PERSONAL_CHAT,
@@ -82,8 +83,17 @@ class OpenAILLMService:
         "goal_refinement": SYSTEM_GOAL_REFINEMENT,
     }
 
-    def __init__(self):
-        if not settings.OPENAI_API_KEY:
+    def __init__(self, provider_context: Optional[Dict[str, Any]] = None):
+        auth = provider_context.get("auth", {}) if provider_context else {}
+        execution = provider_context.get("execution", {}) if provider_context else {}
+
+        api_key = auth.get("credential") or settings.OPENAI_API_KEY
+        base_url = execution.get("baseUrl") or settings.OPENAI_BASE_URL
+        model = execution.get("model") or settings.OPENAI_MODEL
+        temperature = execution.get("temperature")
+        max_tokens = execution.get("maxTokens")
+
+        if not api_key:
             raise ValueError("OPENAI_API_KEY is required")
         self._http_client = httpx.AsyncClient(
             limits=httpx.Limits(
@@ -99,14 +109,18 @@ class OpenAILLMService:
             http2=True,
         )
         self.client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
+            api_key=api_key,
+            base_url=base_url,
             http_client=self._http_client,
             max_retries=settings.LLM_MAX_RETRIES,
         )
-        self.model = settings.OPENAI_MODEL
-        self.temperature = settings.OPENAI_TEMPERATURE
-        self.max_tokens = settings.OPENAI_MAX_TOKENS
+        self.model = model
+        self.temperature = (
+            temperature if temperature is not None else settings.OPENAI_TEMPERATURE
+        )
+        self.max_tokens = (
+            max_tokens if max_tokens is not None else settings.OPENAI_MAX_TOKENS
+        )
 
     async def close(self):
         await self._http_client.aclose()
@@ -152,17 +166,19 @@ class OpenAILLMService:
             elapsed = (time.time() - start) * 1000
             logger.warning(
                 "llm_degraded_retry_exhausted",
-                error=str(exc),
+                error=sanitize_error_message(str(exc)),
                 response_time_ms=round(elapsed, 2),
             )
             raise LLMDegradedError(
                 reason="llm_retry_exhausted",
                 retry_after=settings.LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS,
             )
-        except Exception:
+        except Exception as exc:
             elapsed = (time.time() - start) * 1000
-            logger.exception(
-                "llm_generation_failed", response_time_ms=round(elapsed, 2)
+            logger.error(
+                "llm_generation_failed",
+                response_time_ms=round(elapsed, 2),
+                error=sanitize_error_message(str(exc)),
             )
             return LLMResponse(
                 content="",
@@ -219,7 +235,7 @@ class OpenAILLMService:
             ):
                 raise e
             # Log and return failure for other errors (no retry)
-            logger.exception("llm_generation_failed")
+            logger.error("llm_generation_failed", error=sanitize_error_message(str(e)))
             return LLMResponse(
                 content="",
                 tokens_used=0,
@@ -329,7 +345,16 @@ OptimizedLLMService = OpenAILLMService
 _llm_service = None
 
 
-def get_llm_service():
+def get_llm_service(provider_context: Optional[Dict[str, Any]] = None):
+    if provider_context is not None:
+        return OpenAILLMService(provider_context=provider_context)
+
+    if settings.UNIFIED_PROVIDER_ENABLED:
+        raise ValueError(
+            "provider_context is required when UNIFIED_PROVIDER_ENABLED=True. "
+            "Core-api must resolve and pass provider_context for all AI requests."
+        )
+
     global _llm_service
     if _llm_service is None:
         _llm_service = OpenAILLMService()

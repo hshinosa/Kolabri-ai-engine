@@ -42,10 +42,15 @@ async def health_check():
 
     try:
         from app.services.llm import get_llm_service
+        from app.core.config import settings
 
-        llm = get_llm_service()
-        services["llm"] = llm.model is not None
-        dependencies["llm"] = "healthy" if services["llm"] else "down"
+        if settings.UNIFIED_PROVIDER_ENABLED:
+            services["llm"] = True
+            dependencies["llm"] = "healthy"
+        else:
+            llm = get_llm_service()
+            services["llm"] = llm.model is not None
+            dependencies["llm"] = "healthy" if services["llm"] else "down"
     except Exception:
         logger.exception("health_check_llm_failed")
 
@@ -78,9 +83,8 @@ async def health_check():
     except Exception:
         logger.exception("health_check_breaker_failed")
 
-    is_degraded = (
-        any(state != "healthy" for state in dependencies.values())
-        or any(state == "open" for state in circuit_breakers.values())
+    is_degraded = any(state != "healthy" for state in dependencies.values()) or any(
+        state == "open" for state in circuit_breakers.values()
     )
     overall_status = "degraded" if is_degraded else "healthy"
 

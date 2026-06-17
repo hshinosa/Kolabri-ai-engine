@@ -17,6 +17,8 @@ from app.services.llm import OpenAILLMService, get_llm_service
 
 logger = get_logger(__name__)
 
+ProviderContext = Dict[str, Any]
+
 
 class InterventionType(str, Enum):
     """Types of chat interventions."""
@@ -57,12 +59,22 @@ class ChatInterventionService:
     - Track intervention effectiveness (future)
     """
 
-    def __init__(self, llm_service: Optional[OpenAILLMService] = None):
+    def __init__(
+        self,
+        llm_service: Optional[OpenAILLMService] = None,
+        provider_context: Optional[ProviderContext] = None,
+    ):
         """Initialize intervention service."""
-        self.llm_service = llm_service or get_llm_service()
+        self.llm_service = llm_service or get_llm_service(
+            provider_context=provider_context
+        )
         self.off_topic_threshold = settings.INTERVENTION_OFF_TOPIC_THRESHOLD
-        self.inactivity_threshold_minutes = settings.INTERVENTION_INACTIVITY_THRESHOLD_MINUTES
-        self.minimum_messages_for_summary = settings.INTERVENTION_MINIMUM_MESSAGES_FOR_SUMMARY
+        self.inactivity_threshold_minutes = (
+            settings.INTERVENTION_INACTIVITY_THRESHOLD_MINUTES
+        )
+        self.minimum_messages_for_summary = (
+            settings.INTERVENTION_MINIMUM_MESSAGES_FOR_SUMMARY
+        )
         self.prompt_temperature = settings.INTERVENTION_PROMPT_TEMPERATURE
         self.confidence_off_topic = settings.INTERVENTION_CONFIDENCE_OFF_TOPIC
         self.confidence_inactivity = settings.INTERVENTION_CONFIDENCE_INACTIVITY
@@ -145,9 +157,7 @@ class ChatInterventionService:
             )
 
         except Exception:
-            logger.exception(
-                "intervention_generation_failed", chat_room=chat_room_id
-            )
+            logger.exception("intervention_generation_failed", chat_room=chat_room_id)
 
             return InterventionResult(
                 message="",
@@ -202,9 +212,7 @@ class ChatInterventionService:
             )
 
         except Exception:
-            logger.exception(
-                "summary_generation_failed", chat_room=chat_room_id
-            )
+            logger.exception("summary_generation_failed", chat_room=chat_room_id)
 
             return InterventionResult(
                 message="",
@@ -248,7 +256,8 @@ Buatkan 1-2 pertanyaan yang:
             llm_response = await self.llm_service.generate(
                 prompt=prompt,
                 system_prompt="""Anda adalah fasilitator diskusi akademik Kolabri.
-Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENTION_STYLE,
+Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """
+                + GROUP_INTERVENTION_STYLE,
                 temperature=self.prompt_temperature,
             )
 
@@ -363,13 +372,25 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
             )
 
         if triggers.get("inactive"):
-            return (InterventionType.ENCOURAGE, self.confidence_inactivity, "Chat has been inactive")
+            return (
+                InterventionType.ENCOURAGE,
+                self.confidence_inactivity,
+                "Chat has been inactive",
+            )
 
         if triggers.get("needs_summary"):
-            return (InterventionType.SUMMARIZE, self.confidence_summarize, "Enough messages for summary")
+            return (
+                InterventionType.SUMMARIZE,
+                self.confidence_summarize,
+                "Enough messages for summary",
+            )
 
         if triggers.get("low_engagement"):
-            return (InterventionType.PROMPT, self.confidence_prompt, "Low engagement detected")
+            return (
+                InterventionType.PROMPT,
+                self.confidence_prompt,
+                "Low engagement detected",
+            )
 
         return (InterventionType.ENCOURAGE, 0.0, "No intervention needed")
 
@@ -378,8 +399,13 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """ + GROUP_INTERVENT
 _intervention_service: Optional[ChatInterventionService] = None
 
 
-def get_intervention_service() -> ChatInterventionService:
+def get_intervention_service(
+    provider_context: Optional[ProviderContext] = None,
+) -> ChatInterventionService:
     """Get or create the intervention service singleton."""
+    if provider_context is not None:
+        return ChatInterventionService(provider_context=provider_context)
+
     global _intervention_service
     if _intervention_service is None:
         _intervention_service = ChatInterventionService()

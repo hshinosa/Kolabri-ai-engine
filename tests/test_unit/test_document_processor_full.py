@@ -2432,18 +2432,21 @@ class TestModuleLevelImports:
 
         monkeypatch.setattr(mod, "VISION_AVAILABLE", True)
         monkeypatch.setattr(mod.settings, "ENABLE_MULTIMODAL_PROCESSING", True)
-        monkeypatch.setattr(mod.settings, "OPENAI_API_KEY", "test-openai-key")
-        monkeypatch.setattr(
-            mod.settings, "OPENAI_BASE_URL", "https://example.invalid/v1"
-        )
-        monkeypatch.setattr(mod.settings, "OPENAI_MODEL", "test-model")
+
+        provider_context = {
+            "auth": {"credential": "test-openai-key"},
+            "execution": {
+                "baseUrl": "https://example.invalid/v1",
+                "model": "test-model",
+            },
+        }
 
         mock_openai = MagicMock()
         fake_openai_module = types.SimpleNamespace(
             OpenAI=MagicMock(return_value=mock_openai)
         )
         with patch.dict("sys.modules", {"openai": fake_openai_module}):
-            processor = mod.DocumentProcessor()
+            processor = mod.DocumentProcessor(provider_context=provider_context)
 
         fake_openai_module.OpenAI.assert_called_once_with(
             api_key="test-openai-key",

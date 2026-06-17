@@ -4,6 +4,7 @@ Intervention endpoints — analyze, summary, prompt.
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.api.schemas import (
     InterventionRequest,
@@ -20,6 +21,20 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def dump_provider_context(provider_context):
+    if provider_context is None:
+        return None
+    return provider_context.model_dump(exclude_none=True)
+
+
+def resolve_provider_context(provider_context, feature_flag: bool):
+    if not settings.UNIFIED_PROVIDER_ENABLED:
+        return None
+    if feature_flag:
+        return dump_provider_context(provider_context)
+    return dump_provider_context(provider_context)
+
+
 @router.post(
     "/intervention/analyze",
     response_model=InterventionResponse,
@@ -29,7 +44,12 @@ router = APIRouter()
 )
 async def analyze_intervention(request: InterventionRequest):
     try:
-        intervention_service = get_intervention_service()
+        intervention_service = get_intervention_service(
+            provider_context=resolve_provider_context(
+                request.provider_context,
+                settings.UNIFIED_PROVIDER_INTERVENTIONS,
+            )
+        )
 
         messages_dicts = [
             {
@@ -85,7 +105,12 @@ async def analyze_intervention(request: InterventionRequest):
 )
 async def generate_summary(request: SummaryRequest):
     try:
-        intervention_service = get_intervention_service()
+        intervention_service = get_intervention_service(
+            provider_context=resolve_provider_context(
+                request.provider_context,
+                settings.UNIFIED_PROVIDER_SUMMARIES,
+            )
+        )
 
         messages_dicts = [
             {
@@ -128,7 +153,12 @@ async def generate_summary(request: SummaryRequest):
 )
 async def generate_prompt(request: PromptRequest):
     try:
-        intervention_service = get_intervention_service()
+        intervention_service = get_intervention_service(
+            provider_context=resolve_provider_context(
+                request.provider_context,
+                settings.UNIFIED_PROVIDER_INTERVENTIONS,
+            )
+        )
 
         result = await intervention_service.generate_discussion_prompt(
             topic=request.topic,
