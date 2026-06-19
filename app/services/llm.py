@@ -7,6 +7,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    retry_if_exception,
 )
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -112,7 +113,7 @@ class OpenAILLMService:
             api_key=api_key,
             base_url=base_url,
             http_client=self._http_client,
-            max_retries=settings.LLM_MAX_RETRIES,
+            max_retries=0,  # PERF-AI-02: Disable SDK retries, let tenacity handle all retries
         )
         self.model = model
         self.temperature = (
@@ -198,7 +199,7 @@ class OpenAILLMService:
             min=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_BASE,
         ),
         retry=retry_if_exception_type((RateLimitError, APIConnectionError))
-        | retry_if_exception_type(APIError),
+        | retry_if_exception(lambda e: isinstance(e, APIError) and getattr(e, "status_code", 0) >= 500),
         reraise=True,
     )
     async def _execute_with_retry(self, messages, temperature, max_tokens):
@@ -250,9 +251,14 @@ class OpenAILLMService:
         contexts: List[Dict[str, Any]],
         chat_history: Optional[List[ChatMessage]] = None,
         fading_level: float = 0.0,
+        context: Optional[str] = None,
     ) -> LLMResponse:
         ctx_text = self._format_contexts(contexts)
         system_prompt = self.SYSTEM_PROMPTS["rag"] + "\n\n" + RAG_FEW_SHOT
+        
+        # Add scaffolding context to system prompt if provided
+        if context:
+            system_prompt += f"\n\n{context}"
 
         if chat_history:
             history_text = self._format_chat_history(chat_history)

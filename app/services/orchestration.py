@@ -137,51 +137,53 @@ class Orchestrator:
                 message, default=topic or "General"
             )
 
-            # Log Student Message
-            await self.mongo_logger.log_activity(
-                {
-                    "CaseID": case_id,
-                    "Activity": "Student_Message",
-                    "Timestamp": datetime.now(),
-                    "Resource": f"Student_{user_id}",
-                    "Lifecycle": "complete",
-                    "Attributes": {
-                        "original_text": message,
-                        "srl_object": srl_obj,
-                        "educational_category": analytics.engagement_type.value.capitalize(),
-                        "is_hot": analytics.is_higher_order,
-                        "lexical_variety": analytics.lexical_variety,
-                        "scaffolding_trigger": False,
-                    },
-                }
-            )
-
-            # Log Bot Response
+            # PERF-AI-04: Parallelize mongo writes
             scaffolding_outcome = (
                 "applied" if scaffolding_config.get("enabled", True) else "disabled"
             )
-            await self.mongo_logger.log_activity(
-                {
-                    "CaseID": case_id,
-                    "Activity": "Bot_Response",
-                    "Timestamp": datetime.now(),
-                    "Resource": "Kolabri_Bot",
-                    "Lifecycle": "complete",
-                    "Attributes": {
-                        "original_text": bot_reply,
-                        "srl_object": srl_obj,
-                        "educational_category": "Instructional",
-                        "scaffolding_trigger": rag_result.scaffolding_triggered,
-                        "action_taken": "FETCH" if rag_result.sources else "NO_FETCH",
-                        "guardrail_outcome": rag_result.outcome,
-                        "guardrail_reason": rag_result.reason,
-                        "grounding_ratio": getattr(rag_result, "grounding_ratio", None),
-                        "srl_phase": getattr(rag_result, "srl_phase", None),
-                        "srl_sub_phase": getattr(rag_result, "srl_sub_phase", None),
-                        "scaffolding_level": effective_level,
-                        "scaffolding_outcome": scaffolding_outcome,
-                    },
-                }
+            
+            student_message = {
+                "CaseID": case_id,
+                "Activity": "Student_Message",
+                "Timestamp": datetime.now(),
+                "Resource": f"Student_{user_id}",
+                "Lifecycle": "complete",
+                "Attributes": {
+                    "original_text": message,
+                    "srl_object": srl_obj,
+                    "educational_category": analytics.engagement_type.value.capitalize(),
+                    "is_hot": analytics.is_higher_order,
+                    "lexical_variety": analytics.lexical_variety,
+                    "scaffolding_trigger": False,
+                },
+            }
+            
+            bot_response = {
+                "CaseID": case_id,
+                "Activity": "Bot_Response",
+                "Timestamp": datetime.now(),
+                "Resource": "Kolabri_Bot",
+                "Lifecycle": "complete",
+                "Attributes": {
+                    "original_text": bot_reply,
+                    "srl_object": srl_obj,
+                    "educational_category": "Instructional",
+                    "scaffolding_trigger": rag_result.scaffolding_triggered,
+                    "action_taken": "FETCH" if rag_result.sources else "NO_FETCH",
+                    "guardrail_outcome": rag_result.outcome,
+                    "guardrail_reason": rag_result.reason,
+                    "grounding_ratio": getattr(rag_result, "grounding_ratio", None),
+                    "srl_phase": getattr(rag_result, "srl_phase", None),
+                    "srl_sub_phase": getattr(rag_result, "srl_sub_phase", None),
+                    "scaffolding_level": effective_level,
+                    "scaffolding_outcome": scaffolding_outcome,
+                },
+            }
+            
+            # Write both logs in parallel to reduce latency
+            await asyncio.gather(
+                self.mongo_logger.log_activity(student_message),
+                self.mongo_logger.log_activity(bot_response),
             )
 
             await self._track_message(group_id, user_id, message, analytics)
@@ -202,15 +204,16 @@ class Orchestrator:
                     group_id, analytics, q_score
                 )
                 if needed:
-                    int_msg = self._generate_intervention_message(
-                        analytics, q_score, reason, topic
+                    int_msg = await self._generate_intervention_message(
+                        group_id, analytics, q_score, reason, topic, kwargs
                     )
-                    int_type = reason
-                    await self.mongo_logger.log_intervention(
-                        group_id, reason, int_msg, {"quality": q_score}, session_id
-                    )
-                    async with self._state_lock:
-                        self._last_intervention[group_id] = datetime.now()
+                    if int_msg:
+                        int_type = reason
+                        await self.mongo_logger.log_intervention(
+                            group_id, reason, int_msg, {"quality": q_score}, session_id
+                        )
+                        async with self._state_lock:
+                            self._last_intervention[group_id] = datetime.now()
 
                 # Anomaly Check (Gap 5)
                 anoms = await self.anomaly_detector.detect_session_anomalies(
@@ -551,8 +554,11 @@ class Orchestrator:
                     "lexical_variety": analytics.lexical_variety,
                 }
             )
-        await self.logic_listener.track_participation(group_id, user_id)
-        await self.logic_listener.update_last_message_time(group_id)
+        # PERF-AI-09: Parallelize independent logic_listener calls
+        await asyncio.gather(
+            self.logic_listener.track_participation(group_id, user_id),
+            self.logic_listener.update_last_message_time(group_id),
+        )
 
     async def _should_intervene(
         self, group_id: str, analytics: EngagementAnalysis, quality_score: float
@@ -579,22 +585,34 @@ class Orchestrator:
 
         return False, None
 
-    def _generate_intervention_message(
-        self, analytics, quality_score, reason, topic
-    ) -> str:
-        return self.intervention.generate_intervention(
-            EngagementAnalysis(
-                analytics.lexical_variety,
-                analytics.engagement_type,
-                analytics.is_higher_order,
-                [],
-                0,
-                0,
-                1.0,
-            ),
-            reason,
-            topic,
-        ).message
+    async def _generate_intervention_message(
+        self, group_id, analytics, quality_score, reason, topic, kwargs
+    ) -> Optional[str]:
+        """Generate intervention message via ChatInterventionService.analyze_and_intervene."""
+        # Build messages list from group message history
+        raw_messages = self._group_messages.get(group_id, [])
+        messages = [
+            {
+                "role": "user",
+                "content": m["message"],
+                "sender_id": m["user_id"],
+            }
+            for m in raw_messages[-10:]
+        ]
+        
+        chat_room_id = kwargs.get("chat_room_id") or group_id
+        last_intervention_time = self._last_intervention.get(group_id)
+        
+        result = await self.intervention.analyze_and_intervene(
+            messages=messages,
+            topic=topic or "",
+            chat_room_id=chat_room_id,
+            last_intervention_time=last_intervention_time,
+        )
+        
+        if result.should_intervene:
+            return result.message
+        return None
 
     async def get_group_analytics(self, group_id: str) -> Dict[str, Any]:
         """Aggregate in-memory and DB analytics."""

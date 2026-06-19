@@ -73,8 +73,8 @@ def orchestrator_factory(patched_settings):
         mock_mongo.db.activity_logs.find_one = AsyncMock(return_value=None)
 
         mock_intervention = MagicMock()
-        mock_intervention.generate_intervention = MagicMock(
-            return_value=MagicMock(message="Intervene!")
+        mock_intervention.analyze_and_intervene = AsyncMock(
+            return_value=MagicMock(message="Intervene!", should_intervene=True)
         )
 
         mock_logic = MagicMock()
@@ -93,6 +93,7 @@ def orchestrator_factory(patched_settings):
             )
         )
         mock_goal.generate_socratic_hint = MagicMock(return_value="Hint")
+        mock_goal.generate_llm_hint = AsyncMock(return_value=None)
 
         mock_notification = MagicMock()
         mock_notification.notify_teacher = AsyncMock()
@@ -544,11 +545,14 @@ async def test_should_intervene_returns_false_when_all_metrics_healthy(orchestra
     assert (needed, reason) == (False, None)
 
 
-def test_generate_intervention_message_uses_service(orchestrator_factory):
+@pytest.mark.asyncio
+async def test_generate_intervention_message_uses_service(orchestrator_factory):
     orchestrator, _ = orchestrator_factory()
-
-    message = orchestrator._generate_intervention_message(make_analysis(), 30, "low_quality", "Testing")
-
+    
+    message = await orchestrator._generate_intervention_message(
+        "test-group", make_analysis(), 30, "low_quality", "Testing", {}
+    )
+    
     assert message == "Intervene!"
 
 

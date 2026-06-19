@@ -223,6 +223,7 @@ class PlanVsRealityAnalyzer:
                 e for e in events
                 if e.get("Activity") in ["Student_Message", "Bot_Response"]
                 or e.get("metadata", {}).get("interactionType") in ["STUDENT_MESSAGE", "BOT_RESPONSE"]
+                or e.get("metadata", {}).get("phase") == "Performance"
             ]
 
             if not performance_events:
