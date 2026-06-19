@@ -159,7 +159,7 @@ class PlanVsRealityAnalyzer:
             # Filter for goal setting events — use Activity field (primary) or metadata (backward compat)
             goal_events = [
                 e for e in events
-                if e.get("Activity") == "Goal_Setting"
+                if e.get("Activity") in ["Goal_Setting", "Goal_Validation"]
                 or e.get("metadata", {}).get("interactionType") == "GOAL_SETTING"
                 or e.get("metadata", {}).get("phase") == "Forethought"
             ]
@@ -655,10 +655,10 @@ class PlanVsRealityAnalyzer:
         if not events:
             return 0.0
         
-        # Extract timestamps - try timestamp field first, then createdAt
+        # Extract timestamps - try Timestamp (capital T) first, then timestamp (lowercase), then createdAt
         timestamps = []
         for e in events:
-            ts = e.get("timestamp") or e.get("createdAt")
+            ts = e.get("Timestamp") or e.get("timestamp") or e.get("createdAt")
             if ts:
                 timestamps.append(ts)
         
