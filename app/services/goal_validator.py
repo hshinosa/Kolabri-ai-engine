@@ -399,6 +399,7 @@ class GoalValidator:
 
             llm = get_llm_service(provider_context=self._provider_context)
             week_title = (week_context or {}).get("week_title", "topik minggu ini")
+            material_titles = (week_context or {}).get("material_titles") or []
             mats_str = (
                 ", ".join(material_titles[:5]) if material_titles else "belum ada"
             )
