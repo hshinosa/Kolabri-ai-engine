@@ -156,13 +156,14 @@ class PlanVsRealityAnalyzer:
     ) -> Dict[str, Any]:
         """Extract planned learning goals from Forethought phase."""
         try:
-            # Filter for goal setting events
+            # Filter for goal setting events — use Activity field (primary) or metadata (backward compat)
             goal_events = [
                 e for e in events
-                if e.get("metadata", {}).get("interactionType") == "GOAL_SETTING"
+                if e.get("Activity") == "Goal_Setting"
+                or e.get("metadata", {}).get("interactionType") == "GOAL_SETTING"
                 or e.get("metadata", {}).get("phase") == "Forethought"
             ]
-            
+
             if not goal_events:
                 return {
                     "has_plan": False,
@@ -171,27 +172,27 @@ class PlanVsRealityAnalyzer:
                     "keywords": [],
                     "time_allocation": {}
                 }
-            
-            # Extract goals
+
+            # Extract goals — content/userId for Goal_Setting events, Attributes for others
             goals = []
             for event in goal_events:
-                content = event.get("content", "")
+                content = event.get("content") or event.get("Attributes", {}).get("original_text", "")
                 if content:
                     goals.append({
                         "content": content,
-                        "timestamp": event.get("createdAt"),
-                        "user_id": event.get("userId")
+                        "timestamp": event.get("Timestamp") or event.get("createdAt"),
+                        "user_id": event.get("userId") or event.get("Resource", "").replace("Student_", "")
                     })
-            
+
             # Extract topics from goals
             topics = self._extract_topics_from_goals(goals)
-            
+
             # Extract keywords from goals
             keywords = self._extract_keywords_from_goals(goals)
-            
+
             # Calculate time allocation (if available)
             time_allocation = self._calculate_time_allocation(goal_events)
-            
+
             return {
                 "has_plan": True,
                 "goals": goals,
@@ -200,7 +201,7 @@ class PlanVsRealityAnalyzer:
                 "time_allocation": time_allocation,
                 "goal_count": len(goals)
             }
-            
+
         except Exception:
             logger.exception("plan_extraction_failed")
             return {
@@ -217,13 +218,13 @@ class PlanVsRealityAnalyzer:
     ) -> Dict[str, Any]:
         """Extract actual learning activities from Performance phase."""
         try:
-            # Filter for performance phase events
+            # Filter for performance phase events — use Activity field (primary) or metadata (backward compat)
             performance_events = [
                 e for e in events
-                if e.get("metadata", {}).get("phase") == "Performance"
+                if e.get("Activity") in ["Student_Message", "Bot_Response"]
                 or e.get("metadata", {}).get("interactionType") in ["STUDENT_MESSAGE", "BOT_RESPONSE"]
             ]
-            
+
             if not performance_events:
                 return {
                     "has_reality": False,
@@ -233,24 +234,32 @@ class PlanVsRealityAnalyzer:
                     "duration_minutes": 0,
                     "engagement_metrics": {}
                 }
-            
+
+            # Normalize events to have "content" field (from Attributes.original_text or content)
+            normalized_events = []
+            for e in performance_events:
+                normalized = e.copy()
+                if "content" not in normalized:
+                    normalized["content"] = e.get("Attributes", {}).get("original_text", "")
+                normalized_events.append(normalized)
+
             # Extract topics from messages
-            topics = self._extract_topics_from_messages(performance_events)
-            
+            topics = self._extract_topics_from_messages(normalized_events)
+
             # Extract keywords from messages
-            keywords = self._extract_keywords_from_messages(performance_events)
-            
+            keywords = self._extract_keywords_from_messages(normalized_events)
+
             # Calculate duration
-            duration_minutes = self._calculate_session_duration(performance_events)
-            
+            duration_minutes = self._calculate_session_duration(normalized_events)
+
             # Calculate engagement metrics
-            engagement_metrics = self._calculate_engagement_metrics(performance_events)
-            
+            engagement_metrics = self._calculate_engagement_metrics(normalized_events)
+
             return {
                 "has_reality": True,
                 "topics": topics,
                 "keywords": keywords,
-                "message_count": len(performance_events),
+                "message_count": len(normalized_events),
                 "duration_minutes": duration_minutes,
                 "engagement_metrics": engagement_metrics
             }
@@ -617,9 +626,23 @@ class PlanVsRealityAnalyzer:
         if not events:
             return {"total_minutes": 0}
         
-        start_time = min(e.get("createdAt") for e in events)
-        end_time = max(e.get("createdAt") for e in events)
-        duration_minutes = (end_time - start_time).total_seconds() / 60
+        # Extract timestamps - try Timestamp field first, then createdAt
+        timestamps = []
+        for e in events:
+            ts = e.get("Timestamp") or e.get("createdAt")
+            if ts:
+                timestamps.append(ts)
+        
+        if len(timestamps) < 2:
+            return {"total_minutes": 0}
+        
+        try:
+            start_time = min(timestamps)
+            end_time = max(timestamps)
+            duration_minutes = (end_time - start_time).total_seconds() / 60
+        except (TypeError, AttributeError):
+            # If timestamps are strings or can't be subtracted, return 0
+            return {"total_minutes": 0}
         
         return {
             "total_minutes": duration_minutes,
@@ -632,31 +655,54 @@ class PlanVsRealityAnalyzer:
         if not events:
             return 0.0
         
-        start_time = min(e.get("createdAt") for e in events)
-        end_time = max(e.get("createdAt") for e in events)
-        return (end_time - start_time).total_seconds() / 60
+        # Extract timestamps - try timestamp field first, then createdAt
+        timestamps = []
+        for e in events:
+            ts = e.get("timestamp") or e.get("createdAt")
+            if ts:
+                timestamps.append(ts)
+        
+        if len(timestamps) < 2:
+            return 0.0
+        
+        try:
+            start_time = min(timestamps)
+            end_time = max(timestamps)
+            return (end_time - start_time).total_seconds() / 60
+        except (TypeError, AttributeError):
+            return 0.0
     
     def _calculate_engagement_metrics(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Calculate engagement metrics."""
         if not events:
             return {}
         
-        # Calculate HOT percentage
-        hot_count = sum(1 for e in events if e.get("engagement", {}).get("isHigherOrder"))
+        # Calculate HOT percentage - check Attributes.is_hot or engagement.isHigherOrder
+        hot_count = sum(
+            1 for e in events 
+            if e.get("Attributes", {}).get("is_hot") 
+            or e.get("engagement", {}).get("isHigherOrder")
+        )
         total_count = len(events)
         hot_percentage = (hot_count / total_count * 100) if total_count > 0 else 0
         
-        # Calculate average lexical variety
+        # Calculate average lexical variety - check Attributes.lexical_variety or engagement.lexicalVariety
         lexical_varieties = [
-            e.get("engagement", {}).get("lexicalVariety", 0)
+            e.get("Attributes", {}).get("lexical_variety") 
+            or e.get("engagement", {}).get("lexicalVariety") 
+            or 0
             for e in events
         ]
         avg_lexical = statistics.mean(lexical_varieties) if lexical_varieties else 0
         
-        # Calculate engagement type distribution
+        # Calculate engagement type distribution - use Attributes.srl_object or engagement.engagementType
         engagement_types = defaultdict(int)
         for e in events:
-            eng_type = e.get("engagement", {}).get("engagementType", "behavioral")
+            eng_type = (
+                e.get("Attributes", {}).get("srl_object") 
+                or e.get("engagement", {}).get("engagementType") 
+                or "behavioral"
+            )
             engagement_types[eng_type] += 1
         
         return {
