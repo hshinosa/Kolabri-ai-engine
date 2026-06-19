@@ -2,6 +2,7 @@
 RAG ask & personal chat endpoints.
 """
 
+import asyncio
 import json as _json
 import re
 from typing import Any, cast
@@ -32,12 +33,21 @@ router = APIRouter()
 
 PERSONAL_CHAT_SYSTEM_PROMPT = (
     "Kamu adalah Kolabri AI, asisten belajar cerdas untuk mahasiswa. "
-    "Bantu mahasiswa memahami materi, menjawab pertanyaan akademik maupun pertanyaan personal ringan dengan penjelasan yang jelas, akurat, suportif, dan edukatif. "
-    "Jawab dalam Bahasa Indonesia kecuali diminta sebaliknya. " + PERSONAL_CHAT_STYLE
+    "Jawab dalam Bahasa Indonesia kecuali diminta sebaliknya. "
+    "Ketika mahasiswa bertanya tentang materi atau topik kuliah, berikan jawaban yang SINGKAT dan SIMPEL. "
+    "Fokus pada overview: minggu berapa saja materi tersebut dibahas, di kelas apa, dan poin utamanya secara singkat. "
+    "JANGAN jabarkan semua detail materi. Cukup berikan gambaran besar agar mahasiswa tahu apa yang tersedia. "
+    "Jika mereka ingin detail lebih lanjut, mereka bisa bertanya lagi secara spesifik. "
+    "Untuk pertanyaan personal ringan, tetap ramah dan suportif. "
+    "Gunakan bullet points hanya jika membantu keterbacaan, tapi jangan berlebihan. "
+    + PERSONAL_CHAT_STYLE
 )
 
 COURSE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 MIN_RELEVANCE_SCORE = 0.15
+# Upper bound on course collections scanned per personal-chat request.
+# Matches PersonalChatRequest.course_ids max_length in app/api/schemas.py.
+MAX_PERSONAL_RAG_COURSES = 20
 
 
 def dump_provider_context(provider_context: Any) -> dict[str, Any] | None:
@@ -214,14 +224,16 @@ async def get_reading_recommendations(request: ReadingRecommendationRequest):
 RAG_CONTEXT_PROMPT = (
     "\n\nBerikut adalah materi kuliah yang relevan dari knowledge base:\n\n"
     "{context}\n\n"
-    "Gunakan materi di atas sebagai referensi utama untuk menjawab. "
-    "Jika materi tidak mencakup pertanyaan, jawab berdasarkan pengetahuan umum tetapi jelaskan bahwa itu bukan dari materi kuliah."
+    "Gunakan materi di atas sebagai konteks, tapi JANGAN jabarkan semua detail. "
+    "Berikan jawaban SINGKAT yang fokus pada: "
+    "1) Topik/materi apa saja yang tersedia, "
+    "2) Di minggu berapa materi tersebut dibahas, "
+    "3) Di kelas mana materi ini relevan. "
+    "Jika pertanyaan tidak terjawab oleh materi di atas, katakan dengan jujur bahwa materi tidak mencakup pertanyaan tersebut."
 )
-
 CITATION_INSTRUCTION = (
-    "\n\nJika kamu menggunakan materi di atas, sebutkan sumbernya secara singkat "
-    "(contoh: 'Berdasarkan materi [nama file]...'). "
-    "Jangan mengarang sumber yang tidak ada di daftar referensi."
+    " Ketika merujuk materi, sebutkan secara singkat (contoh: 'materi minggu 3 di Pemrograman Web')."
+    " Jangan membuat sitasi yang terlalu panjang atau detail."
 )
 
 
@@ -233,9 +245,13 @@ async def search_personal_rag(
 ) -> list[dict]:
     """Search across multiple course collections and merge results."""
     rag_pipeline = get_rag_pipeline(provider_context=provider_context)
-    all_results = []
 
-    for course_id in course_ids[:10]:
+    # Scan up to the schema-advertised bound (PersonalChatRequest.course_ids
+    # max_length=20). Search collections concurrently so widening the scan
+    # does not multiply latency.
+    scanned = course_ids[:MAX_PERSONAL_RAG_COURSES]
+
+    async def _search_one(course_id: str) -> list[dict]:
         collection_name = f"course_{course_id}"
         try:
             results = await rag_pipeline.vector_store.search(
@@ -246,12 +262,16 @@ async def search_personal_rag(
             )
             for r in results:
                 r["_course_id"] = course_id
-            all_results.extend(results)
+            return results
         except Exception:
             logger.warning(
                 "personal_rag_collection_skip",
                 collection=collection_name,
             )
+            return []
+
+    per_course = await asyncio.gather(*(_search_one(cid) for cid in scanned))
+    all_results = [r for results in per_course for r in results]
 
     all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
     return all_results[:7]
@@ -378,18 +398,21 @@ async def personal_chat(request: PersonalChatRequest):
     summary="Personal AI chat with RAG and SSE streaming",
 )
 async def personal_chat_stream(request: PersonalChatRequest):
-    llm = get_llm_service(
-        provider_context=resolve_provider_context(
-            request.provider_context,
-            settings.UNIFIED_PROVIDER_PERSONAL_CHAT,
-        )
+    resolved_ctx = resolve_provider_context(
+        request.provider_context,
+        settings.UNIFIED_PROVIDER_PERSONAL_CHAT,
     )
+    llm = get_llm_service(provider_context=resolved_ctx)
 
     system_prompt = PERSONAL_CHAT_SYSTEM_PROMPT
     citations = []
 
     if request.course_ids:
-        rag_results = await search_personal_rag(request.message, request.course_ids)
+        rag_results = await search_personal_rag(
+            request.message,
+            request.course_ids,
+            provider_context=resolved_ctx,
+        )
         if rag_results:
             context_str, citations = build_rag_context_and_citations(rag_results)
             system_prompt += RAG_CONTEXT_PROMPT.format(context=context_str)
