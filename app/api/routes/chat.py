@@ -372,7 +372,7 @@ async def personal_chat(request: PersonalChatRequest):
             model=llm.model,
             messages=messages,
             temperature=0.7,
-            max_tokens=2048,
+            max_tokens=8192,
         )
 
         reply = (response.choices[0].message.content or "").strip()
@@ -443,7 +443,7 @@ async def personal_chat_stream(request: PersonalChatRequest):
                 model=llm.model,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2048,
+                max_tokens=8192,
                 stream=True,
             )
             async for chunk in stream:
