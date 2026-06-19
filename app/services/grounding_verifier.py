@@ -100,9 +100,10 @@ class GroundingVerifier:
         return len(intersection) / len(union) if union else 0.0
 
     async def _compute_similarity_async(self, text_a: str, text_b: str) -> float:
+        # PERF-AI-05: Cache embeddings to avoid redundant calls
         try:
-            vec_a = await self.embedding_service.get_embedding(text_a)
-            vec_b = await self.embedding_service.get_embedding(text_b)
+            vec_a = await self._get_cached_embedding(text_a)
+            vec_b = await self._get_cached_embedding(text_b)
 
             similarity = np.dot(vec_a, vec_b) / (
                 np.linalg.norm(vec_a) * np.linalg.norm(vec_b)
@@ -111,6 +112,14 @@ class GroundingVerifier:
         except Exception as e:
             logger.warning("embedding_similarity_failed", error=str(e))
             return self._compute_similarity(text_a, text_b)
+
+    async def _get_cached_embedding(self, text: str):
+        """Get embedding with in-memory cache to avoid redundant calls."""
+        if not hasattr(self, '_embedding_cache'):
+            self._embedding_cache = {}
+        if text not in self._embedding_cache:
+            self._embedding_cache[text] = await self.embedding_service.get_embedding(text)
+        return self._embedding_cache[text]
 
     def verify_grounding(
         self,
@@ -243,7 +252,6 @@ class GroundingVerifier:
                 grounded_claims.append(claim)
             else:
                 ungrounded_claims.append(claim)
-
         grounding_ratio = len(grounded_claims) / len(claims)
         is_grounded = grounding_ratio >= overall_threshold
 

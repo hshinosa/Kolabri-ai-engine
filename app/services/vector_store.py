@@ -153,7 +153,9 @@ class VectorStoreService:
                     )
             query_filter = Filter(must=conditions)
 
-        results = self._client.query_points(
+        # PERF-AI-10: Wrap blocking Qdrant query_points in asyncio.to_thread
+        results = await asyncio.to_thread(
+            self._client.query_points,
             collection_name=target_collection,
             query=query_embedding,
             limit=n_results,

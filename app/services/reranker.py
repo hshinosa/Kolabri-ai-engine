@@ -128,7 +128,7 @@ class CrossEncoderReranker:
             start_time = time.time()
 
             doc_contents = [doc.get('content', '') for doc in documents]
-            scores = list(self.model.rerank(query=query, documents=doc_contents))
+            scores = list(await asyncio.to_thread(self.model.rerank, query=query, documents=doc_contents))
 
             scored_docs = []
             for doc, score in zip(documents, scores):

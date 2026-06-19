@@ -415,7 +415,7 @@ async def test_grounding_verifier_async_verify_with_mocked_embeddings_returns_gr
 
     assert result.is_grounded is True
     assert result.grounding_ratio == 1.0
-    assert embedding_service.get_embedding.await_count == 2
+    assert embedding_service.get_embedding.await_count == 1  # PERF-AI-05: cached for identical text
 
 
 @pytest.mark.asyncio

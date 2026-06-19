@@ -139,18 +139,12 @@ class LogicListener:
         message: str, 
         group_id: str
     ) -> InterventionTrigger:
-        """
+        """DEPRECATED (MINOR-02): Dead code — superseded by core-api silence/escalation system.
+        No production callers. Retained for backward compat with tests only.
+
         Check if message is relevant to the group topic.
-        
         Uses embedding similarity to detect off-topic discussions.
         Triggers intervention if 3 consecutive messages have similarity < 0.6.
-        
-        Args:
-            message: The message to check
-            group_id: Group identifier
-        
-        Returns:
-            InterventionTrigger with intervention details if needed
         """
         topic = self._group_topics.get(group_id, "")
         
@@ -245,14 +239,10 @@ class LogicListener:
             )
     
     def check_silence(self, group_id: str) -> InterventionTrigger:
-        """
+        """DEPRECATED (MINOR-02): Dead code — superseded by core-api silence/escalation system.
+        No production callers. Retained for backward compat with tests only.
+
         Check if group has been silent for too long.
-        
-        Args:
-            group_id: Group identifier
-        
-        Returns:
-            InterventionTrigger with intervention details if silence detected
         """
         last_timestamp = self._last_message_timestamp.get(group_id)
         

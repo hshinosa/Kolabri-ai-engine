@@ -215,7 +215,7 @@ async def test_handle_message_intervention_and_high_anomaly_notify_teacher(orche
 
     assert result.success is True
     assert result.intervention == "Intervene!"
-    assert result.intervention_type == "low_quality"
+    assert result.intervention_type == "clarify"  # BUG-05: mapped from "low_quality"
     assert result.should_notify_teacher is True
     assert result.quality_score == 75
     mocks["mongo"].log_intervention.assert_awaited_once()

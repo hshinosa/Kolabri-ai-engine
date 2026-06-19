@@ -146,7 +146,11 @@ class RAGPipeline:
 
             embedder = get_embedding_service()
             v1 = await embedder.get_embedding(query)
-            v2 = await embedder.get_embedding(self._last_query)
+            # PERF-AI-06: Reuse cached embedding of last query instead of re-embedding
+            v2 = getattr(self, "_last_query_embedding", None)
+            if v2 is None:
+                v2 = await embedder.get_embedding(self._last_query)
+                self._last_query_embedding = v2
 
             dot_product = sum(a * b for a, b in zip(v1, v2))
             norm1 = math.sqrt(sum(a * a for a in v1))
@@ -431,6 +435,7 @@ class RAGPipeline:
                     # Step 2: Format contexts & Update semantic cache
                     contexts = self._format_search_results(search_results)
                     self._last_query = query
+                    self._last_query_embedding = None  # PERF-AI-06: Invalidate cached embedding
                     self._last_contexts = contexts
 
                 # Step 3: Generate response with RAG
@@ -452,6 +457,7 @@ class RAGPipeline:
                     contexts=contexts,
                     chat_history=chat_history,
                     fading_level=fading_level,
+                context=scaffolding_ctx,
                 )
 
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)

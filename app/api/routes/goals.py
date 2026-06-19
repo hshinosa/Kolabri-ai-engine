@@ -44,7 +44,7 @@ class GoalValidateBody(BaseModel):
     chat_space_id: str = Field(..., min_length=1)
     week_context: Optional[dict[str, Any]] = None
     provider_context: Optional[ProviderContextV1] = None
-
+    group_id: Optional[str] = None
 
 @router.post(
     "/goals/validate",
@@ -61,13 +61,14 @@ async def validate_goal(request: Request):
             goal_text = body.goal_text
             user_id = body.user_id
             chat_space_id = body.chat_space_id
+            group_id = body.group_id
             week_context = body.week_context
-            provider_context = resolve_provider_context(body.provider_context)
         else:
             form = await request.form()
             goal_text = str(form.get("goal_text", ""))
             user_id = str(form.get("user_id", ""))
             chat_space_id = str(form.get("chat_space_id", ""))
+            group_id = str(form.get("group_id", "")) or None
             raw_ctx = form.get("week_context")
             if raw_ctx:
                 try:
@@ -81,6 +82,7 @@ async def validate_goal(request: Request):
             user_id=user_id,
             chat_space_id=chat_space_id,
             week_context=week_context,
+            group_id=group_id,
         )
 
         logger.info(

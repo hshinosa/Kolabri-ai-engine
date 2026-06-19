@@ -55,7 +55,7 @@ class OrchestrationResult:
 
 
 class Orchestrator:
-    """Central orchestration service implementing Teacher-AI Complementarity."""
+    """Central orchestration service implementing Teacher-AI Complementarity. MINOR-03: Analytics ownership — in-memory analytics (fading, streaks, message history) are ephemeral per-process. Database analytics (ChatLog, activity_logs) are persistent and authoritative in core-api. Future: consolidate to DB-only."""
 
     def __init__(self, provider_context: Optional[ProviderContext] = None, **services):
         self.rag = services.get("rag") or get_rag_pipeline(
@@ -208,7 +208,7 @@ class Orchestrator:
                         group_id, analytics, q_score, reason, topic, kwargs
                     )
                     if int_msg:
-                        int_type = reason
+                        int_type = self._map_intervention_type(reason)
                         await self.mongo_logger.log_intervention(
                             group_id, reason, int_msg, {"quality": q_score}, session_id
                         )
@@ -388,7 +388,10 @@ class Orchestrator:
         user_id: str,
         chat_space_id: str,
         week_context: Optional[Dict[str, Any]] = None,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        # BUG-01+02: Use group_id for CaseID and state tracking (not chat_space_id)
+        tracking_key = group_id or chat_space_id
         res = self.goal_validator.validate_goal(goal_text)
         week_off_topic = False
         if week_context and week_context.get("week_title"):
@@ -418,50 +421,53 @@ class Orchestrator:
                 )
 
         async with self._state_lock:
-            streak = self._group_smart_streak.get(chat_space_id, 0)
+            streak = self._group_smart_streak.get(tracking_key, 0)
 
             if res.is_valid:
                 streak += 1
                 if streak >= 3:
-                    curr = self._group_fading_levels.get(chat_space_id, 0.0)
-                    self._group_fading_levels[chat_space_id] = min(curr + 0.2, 1.0)
+                    curr = self._group_fading_levels.get(tracking_key, 0.0)
+                    self._group_fading_levels[tracking_key] = min(curr + 0.2, 1.0)
                     streak = 0
             else:
                 streak = 0
 
-            self._group_smart_streak[chat_space_id] = streak
+            self._group_smart_streak[tracking_key] = streak
 
         # Log event
         session_id = chat_space_id.split("_")[-1] if "_" in chat_space_id else "1"
-        await self.mongo_logger.log_activity(
-            {
-                "CaseID": f"{chat_space_id}_session_{session_id}",
-                "Activity": "Goal_Validation",
-                "Timestamp": datetime.now(),
-                "Resource": f"Student_{user_id}",
-                "Lifecycle": "complete",
-                "Attributes": {
-                    "original_text": goal_text,
-                    "srl_object": "Learning_Goal",
-                    "educational_category": "Metacognitive",
-                    "is_hot": True,
-                    "scaffolding_trigger": not res.is_valid,
-                    "score": res.score,
-                    "missingCriteria": res.missing_criteria,
-                },
-            }
-        )
-        await self.mongo_logger.log_activity(
-            {
-                "CaseID": f"{chat_space_id}_session_{session_id}",
-                "Activity": "Goal_Setting",
-                "Timestamp": datetime.now(),
-                "Resource": f"Student_{user_id}",
-                "Lifecycle": "complete",
-                "metadata": {"interactionType": "GOAL_SETTING", "phase": "Forethought"},
-                "content": goal_text,
-                "userId": user_id,
-            }
+        case_id = f"{tracking_key}_session_{session_id}"
+        await asyncio.gather(
+            self.mongo_logger.log_activity(
+                {
+                    "CaseID": case_id,
+                    "Activity": "Goal_Validation",
+                    "Timestamp": datetime.now(),
+                    "Resource": f"Student_{user_id}",
+                    "Lifecycle": "complete",
+                    "Attributes": {
+                        "original_text": goal_text,
+                        "srl_object": "Learning_Goal",
+                        "educational_category": "Metacognitive",
+                        "is_hot": True,
+                        "scaffolding_trigger": not res.is_valid,
+                        "score": res.score,
+                        "missingCriteria": res.missing_criteria,
+                    },
+                }
+            ),
+            self.mongo_logger.log_activity(
+                {
+                    "CaseID": case_id,
+                    "Activity": "Goal_Setting",
+                    "Timestamp": datetime.now(),
+                    "Resource": f"Student_{user_id}",
+                    "Lifecycle": "complete",
+                    "metadata": {"interactionType": "GOAL_SETTING", "phase": "Forethought"},
+                    "content": goal_text,
+                    "userId": user_id,
+                }
+            ),
         )
 
         is_valid = res.is_valid and not week_off_topic
@@ -560,6 +566,18 @@ class Orchestrator:
             self.logic_listener.update_last_message_time(group_id),
         )
 
+    # BUG-05: Map orchestration issue reasons to valid InterventionType enum values
+    _INTERVENTION_TYPE_MAP = {
+        "low_lexical": "prompt",
+        "low_quality": "clarify",
+        "participation_inequity": "encourage",
+    }
+
+    def _map_intervention_type(self, reason: Optional[str]) -> Optional[str]:
+        """Map internal issue reason to valid InterventionType string."""
+        if not reason:
+            return None
+        return self._INTERVENTION_TYPE_MAP.get(reason, "prompt")
     async def _should_intervene(
         self, group_id: str, analytics: EngagementAnalysis, quality_score: float
     ) -> Tuple[bool, Optional[str]]:

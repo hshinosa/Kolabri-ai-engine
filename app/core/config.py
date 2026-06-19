@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     LLM_RETRY_DELAY_BASE: float = 1.0
     LLM_RETRY_DELAY_MULTIPLIER: float = 2.0
     LLM_TIMEOUT_CONNECT_SECONDS: float = 10.0
-    LLM_TIMEOUT_READ_SECONDS: float = 90.0
+    LLM_TIMEOUT_READ_SECONDS: float = 45.0  # PERF-AI-07: Reduced from 90s for faster fail-fast
     LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS: int = 30
 
     UNIFIED_PROVIDER_ENABLED: bool = False
