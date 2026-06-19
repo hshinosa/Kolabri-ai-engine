@@ -7,6 +7,33 @@ Validates learning goals against SMART criteria:
 - A: Achievable
 - R: Relevant
 - T: Time-bound (deadline indicators)
+
+Known Limitations & Future Work
+-------------------------------
+The validator uses fast regex/keyword heuristics, not LLM judgment, so the
+metric is intentionally permissive. Audited edge cases (2026-06-19) that a
+future iteration should address:
+
+1. Achievable & Relevant are hardcoded True (see validate_goal: details for
+   ACHIEVABLE/RELEVANT). Absurd/over-ambitious goals (e.g. "membangun aplikasi
+   lengkap dalam 1 jam") pass as long as S/M/T are present. Needs LLM-based
+   feasibility/scope judgment.
+2. check_measurable treats ANY number as measurable (any-digit pattern), so a year
+   or page number ("...pada tahun 2024...") falsely satisfies Measurable.
+   Should require a number tied to a learning target/unit, not any digit.
+3. Off-topic / week-alignment check only runs when the goal has >= 8 words
+   (orchestration.validate_goal). Short off-topic goals (e.g. 7-word goals)
+   bypass alignment and get accepted. Consider lowering the word threshold or
+   using embedding similarity instead of word overlap.
+4. Week alignment uses raw [a-z]{4,} word overlap against material titles, so
+   generic week titles ("Pengantar DevOps") wrongly flag specific on-topic
+   goals as off-topic. Embedding/semantic similarity would be more robust.
+5. check_measurable accepts qualifiers like "minimal"/"maksimal"/"target" with
+   no actual number ("minimal beberapa prinsip"), counting vague phrasing as
+   measurable.
+6. Goal text is NOT run through the injection_detector (unlike the chat path).
+   An on-topic prompt-injection string can pass goal validation. Consider
+   sharing the guardrail used for chat input.
 """
 
 import re
