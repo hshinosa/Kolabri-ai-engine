@@ -245,6 +245,44 @@ class OpenAILLMService:
                 error="Internal error",
             )
 
+    async def stream_generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        context: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ):
+        """Async generator yielding content chunks (str) via stream=True.
+
+        PERF-AI-01: Streaming path for NO_FETCH queries (greetings, short follow-ups).
+        Bypasses tenacity/circuit-breaker — streaming is fire-and-forget; caller
+        handles errors. Cannot retry after partial yield. NO_FETCH path is low-risk
+        (no grounding at stake). See design.md PERF-AI-01 Layer 1.
+        """
+        full_system = system_prompt or self.SYSTEM_PROMPTS["default"]
+        if context:
+            full_system += f"\n\nKonteks tambahan:\n{context}"
+        messages = [
+            {"role": "system", "content": full_system},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            stream = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature or self.temperature,
+                max_tokens=max_tokens or self.max_tokens,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield delta.content
+        except Exception as e:
+            logger.error("llm_stream_failed", error=sanitize_error_message(str(e)))
+            raise
+
     async def generate_rag_response(
         self,
         query: str,

@@ -594,6 +594,147 @@ class RAGPipeline:
             # Execute without caching
             return await execute_rag_query()
 
+    async def query_stream(
+        self,
+        query: str,
+        collection_name: Optional[str] = None,
+        n_results: int = 5,
+        chat_history: Optional[List[ChatMessage]] = None,
+        filter_metadata: Optional[Dict[str, Any]] = None,
+        fading_level: float = 0.0,
+        score_threshold: Optional[float] = None,
+        guardrail_context: Optional[Dict[str, Any]] = None,
+        session_week_index: Optional[int] = None,
+        max_week_index: Optional[int] = None,
+    ):
+        """Async generator for streaming RAG responses.
+
+        PERF-AI-01: Conditional streaming.
+        - NO_FETCH path (greetings, short follow-ups): streams tokens directly via
+          llm_service.stream_generate(). No grounding/guardrail needed (no retrieved context).
+        - FETCH path (substantive questions): delegates to existing query() and yields
+          the complete result as a single "full" event. Grounding/guardrails need the
+          full response, so streaming is not applicable here.
+
+        Yields dict events:
+            {"type": "token", "content": str}   — incremental content (NO_FETCH only)
+            {"type": "full", "content": str, "sources": [...], "citations": [...], ...}  — complete result (FETCH)
+            {"type": "done", "sources": [...], "citations": [...]}  — terminator
+            {"type": "error", "content": str}    — error
+        """
+        from app.services.week_rag import week_metadata_filter
+
+        effective_filter = filter_metadata
+        week_cap = week_metadata_filter(max_week_index)
+        if week_cap:
+            effective_filter = {**(filter_metadata or {}), **week_cap}
+
+        # Input guardrail (same as query())
+        guardrail_result = self.guardrails.check_input(query, guardrail_context)
+        from app.core.guardrail_diagnostics import log_guardrail_decision
+
+        log_guardrail_decision(
+            guardrail_result, surface="input", route="rag.query_stream"
+        )
+
+        if guardrail_result.action == GuardrailAction.BLOCK:
+            triggered = guardrail_result.triggered_rules or []
+            rule_id = (
+                triggered[0] if triggered else (guardrail_result.reason or "guarded")
+            )
+            yield {
+                "type": "full",
+                "content": guardrail_result.message
+                or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
+                "sources": [],
+                "citations": [],
+                "outcome": "guarded",
+                "reason": rule_id,
+            }
+            yield {"type": "done", "sources": [], "citations": []}
+            return
+
+        safe_query = guardrail_result.sanitized_input or query
+
+        # Query rewriting for short follow-ups
+        search_query = safe_query
+        if chat_history and len(safe_query.split()) <= 6:
+            last_assistant = None
+            for msg in reversed(chat_history):
+                if msg.role == "assistant":
+                    last_assistant = msg.content
+                    break
+            if last_assistant:
+                topic_hint = last_assistant[:200]
+                search_query = f"{safe_query} (konteks sebelumnya: {topic_hint})"
+
+        should_fetch = self._should_retrieve(search_query, self._last_contexts)
+
+        if not should_fetch:
+            # NO_FETCH: stream tokens directly
+            logger.info("rag_stream_no_fetch", query=safe_query[:100])
+
+            no_fetch_prompt = query
+            if chat_history:
+                history_lines = [
+                    f"{'Mahasiswa' if m.role == 'user' else 'Asisten'}: {m.content}"
+                    for m in chat_history[-5:]
+                ]
+                history_text = "\n".join(history_lines)
+                no_fetch_prompt = f"Riwayat percakapan:\n{history_text}\n\nPertanyaan terbaru mahasiswa: {query}"
+
+            try:
+                async for chunk in self.llm_service.stream_generate(
+                    prompt=no_fetch_prompt,
+                    system_prompt=SYSTEM_PERSONAL_CHAT,
+                    temperature=TEMPERATURE["personal_chat"],
+                ):
+                    yield {"type": "token", "content": chunk}
+                yield {"type": "done", "sources": [], "citations": []}
+            except Exception:
+                logger.exception("rag_stream_no_fetch_failed", query=query[:100])
+                yield {
+                    "type": "error",
+                    "content": "Maaf, terjadi kesalahan saat memproses pesan.",
+                }
+        else:
+            # FETCH: delegate to query(), yield full result as single event
+            logger.info("rag_stream_fetch_fallback", query=safe_query[:100])
+            try:
+                result = await self.query(
+                    query=query,
+                    collection_name=collection_name,
+                    n_results=n_results,
+                    chat_history=chat_history,
+                    filter_metadata=filter_metadata,
+                    fading_level=fading_level,
+                    score_threshold=score_threshold,
+                    guardrail_context=guardrail_context,
+                    session_week_index=session_week_index,
+                    max_week_index=max_week_index,
+                )
+                yield {
+                    "type": "full",
+                    "content": result.answer,
+                    "sources": result.sources,
+                    "citations": result.citations or [],
+                    "outcome": result.outcome,
+                    "reason": result.reason,
+                    "scaffolding_triggered": result.scaffolding_triggered,
+                    "grounding_ratio": getattr(result, "grounding_ratio", None),
+                }
+                yield {
+                    "type": "done",
+                    "sources": result.sources,
+                    "citations": result.citations or [],
+                }
+            except Exception:
+                logger.exception("rag_stream_fetch_failed", query=query[:100])
+                yield {
+                    "type": "error",
+                    "content": "Maaf, terjadi kesalahan saat memproses pesan.",
+                }
+
     async def query_with_course_context(
         self,
         query: str,

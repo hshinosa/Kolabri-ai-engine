@@ -4,7 +4,8 @@ Orchestration endpoint — main chat pipeline.
 
 import asyncio
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import json as _json
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -105,3 +106,43 @@ async def orchestrated_chat(request: OrchestrationRequest):
             should_notify_teacher=False,
             error="Internal error",
         )
+
+
+@router.post(
+    "/chat/stream",
+    tags=["Orchestration"],
+    summary="Orchestrated chat with SSE streaming (NO_FETCH path)",
+    description="Stream orchestrated chat responses. NO_FETCH path (greetings, short follow-ups) streams tokens; FETCH path returns full result.",
+)
+async def orchestrated_chat_stream(request: OrchestrationRequest):
+    orchestrator = get_orchestrator(
+        provider_context=resolve_provider_context(request.provider_context)
+    )
+
+    async def event_generator():
+        try:
+            async for event in orchestrator.handle_message_stream(
+                user_id=request.user_id,
+                group_id=request.group_id,
+                message=request.message,
+                topic=request.topic or "General Discussion",
+                collection_name=request.collection_name,
+                course_id=request.course_id,
+                chat_room_id=request.chat_room_id,
+                guardrail_policy=request.guardrail_policy,
+                scaffolding_config=request.scaffolding_config,
+                session_week_index=request.session_week_index,
+                max_week_index=request.max_week_index,
+                chat_history=request.chat_history,
+            ):
+                yield f"data: {_json.dumps(event, default=str)}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception:
+            logger.exception("orchestrated_chat_stream_failed")
+            yield f"data: {_json.dumps({'type': 'error', 'content': 'Internal error'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

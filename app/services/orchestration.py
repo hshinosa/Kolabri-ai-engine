@@ -275,6 +275,218 @@ class Orchestrator:
                 citations=[],
             )
 
+    async def handle_message_stream(
+        self, user_id: str, group_id: str, message: str, topic: str = None, **kwargs
+    ):
+        """Stream version of handle_message.
+
+        PERF-AI-01: Yields dict events for SSE streaming.
+        - NO_FETCH path: yields {"type":"token","content":chunk} per token
+        - FETCH path: yields {"type":"full",...} with complete result
+        - On completion: yields {"type":"done",...} with analytics + intervention data
+        - On error: yields {"type":"error","content":str}
+
+        Logging (mongo) + intervention check run on completion (after all tokens/full).
+        """
+        try:
+            analytics = self.analyzer.analyze_interaction(message)
+            fading = self._group_fading_levels.get(group_id, 0.0)
+
+            scaffolding_config = kwargs.get("scaffolding_config") or {}
+            effective_level = scaffolding_config.get("scaffolding_level") or "auto"
+
+            from app.services.llm import ChatMessage
+
+            raw_history = kwargs.get("chat_history") or []
+            chat_history = (
+                [
+                    ChatMessage(
+                        role=m.role if hasattr(m, "role") else m.get("role", "user"),
+                        content=m.content
+                        if hasattr(m, "content")
+                        else m.get("content", ""),
+                    )
+                    for m in raw_history[-10:]
+                ]
+                if raw_history
+                else None
+            )
+
+            full_content = ""
+            rag_sources = []
+            rag_citations = []
+            rag_outcome = None
+            rag_reason = None
+            scaffolding_triggered = False
+            grounding_ratio = None
+
+            async for event in self.rag.query_stream(
+                query=message,
+                collection_name=kwargs.get("collection_name"),
+                chat_history=chat_history,
+                guardrail_context={
+                    "guardrail_policy": kwargs.get("guardrail_policy") or {},
+                    "scaffolding_config": scaffolding_config,
+                },
+                session_week_index=kwargs.get("session_week_index"),
+                max_week_index=kwargs.get("max_week_index"),
+            ):
+                if event["type"] == "token":
+                    full_content += event["content"]
+                    yield event
+                elif event["type"] == "full":
+                    full_content = event["content"]
+                    rag_sources = event.get("sources", [])
+                    rag_citations = event.get("citations", [])
+                    rag_outcome = event.get("outcome")
+                    rag_reason = event.get("reason")
+                    scaffolding_triggered = event.get("scaffolding_triggered", False)
+                    grounding_ratio = event.get("grounding_ratio")
+                    yield event
+                elif event["type"] == "done":
+                    rag_sources = event.get("sources", rag_sources)
+                    rag_citations = event.get("citations", rag_citations)
+                    # Don't yield done yet -- run logging + intervention first
+                elif event["type"] == "error":
+                    yield event
+                    return
+
+            # Logging (same as handle_message)
+            session_id = (kwargs.get("chat_room_id") or "1").split("_")[-1]
+            case_id = f"{group_id}_session_{session_id}"
+            srl_obj = self.analyzer.extract_srl_object(
+                message, default=topic or "General"
+            )
+            scaffolding_outcome = (
+                "applied" if scaffolding_config.get("enabled", True) else "disabled"
+            )
+
+            student_message = {
+                "CaseID": case_id,
+                "Activity": "Student_Message",
+                "Timestamp": datetime.now(),
+                "Resource": f"Student_{user_id}",
+                "Lifecycle": "complete",
+                "Attributes": {
+                    "original_text": message,
+                    "srl_object": srl_obj,
+                    "educational_category": analytics.engagement_type.value.capitalize(),
+                    "is_hot": analytics.is_higher_order,
+                    "lexical_variety": analytics.lexical_variety,
+                    "scaffolding_trigger": False,
+                },
+            }
+
+            bot_response = {
+                "CaseID": case_id,
+                "Activity": "Bot_Response",
+                "Timestamp": datetime.now(),
+                "Resource": "Kolabri_Bot",
+                "Lifecycle": "complete",
+                "Attributes": {
+                    "original_text": full_content,
+                    "srl_object": srl_obj,
+                    "educational_category": "Instructional",
+                    "scaffolding_trigger": scaffolding_triggered,
+                    "action_taken": "FETCH" if rag_sources else "NO_FETCH",
+                    "guardrail_outcome": rag_outcome,
+                    "guardrail_reason": rag_reason,
+                    "grounding_ratio": grounding_ratio,
+                    "scaffolding_level": effective_level,
+                    "scaffolding_outcome": scaffolding_outcome,
+                },
+            }
+
+            await asyncio.gather(
+                self.mongo_logger.log_activity(student_message),
+                self.mongo_logger.log_activity(bot_response),
+            )
+
+            await self._track_message(group_id, user_id, message, analytics)
+
+            # Intervention check (same as handle_message)
+            int_msg, int_type, notify = None, None, False
+            q_score = None
+
+            async with self._state_lock:
+                group_msgs = self._group_messages.get(group_id, [])
+            if len(group_msgs) >= settings.INTERVENTION_MIN_MESSAGES:
+                q_res = self.analyzer.get_discussion_quality_score(
+                    [m["message"] for m in group_msgs[-10:]]
+                )
+                q_score = q_res["quality_score"]
+
+                needed, reason = await self._should_intervene(
+                    group_id, analytics, q_score
+                )
+                if needed:
+                    int_msg = await self._generate_intervention_message(
+                        group_id, analytics, q_score, reason, topic, kwargs
+                    )
+                    if int_msg:
+                        int_type = self._map_intervention_type(reason)
+                        await self.mongo_logger.log_intervention(
+                            group_id, reason, int_msg, {"quality": q_score}, session_id
+                        )
+                        async with self._state_lock:
+                            self._last_intervention[group_id] = datetime.now()
+
+                anoms = await self.anomaly_detector.detect_session_anomalies(
+                    case_id, group_id
+                )
+                if anoms.has_anomalies:
+                    await self.mongo_logger.log_activity(
+                        {
+                            "CaseID": case_id,
+                            "Activity": "Anomaly_Detected",
+                            "Timestamp": datetime.now(),
+                            "Resource": "System_AnomalyDetector",
+                            "Lifecycle": "complete",
+                            "Attributes": {
+                                "original_text": anoms.description,
+                                "metadata": {
+                                    "type": anoms.anomaly_type,
+                                    "severity": anoms.severity,
+                                },
+                            },
+                        }
+                    )
+                    if anoms.severity == "high":
+                        notify = True
+                        await self.notification_service.notify_teacher(
+                            kwargs.get("course_id", "default"),
+                            group_id,
+                            f"ANOMALY_{anoms.anomaly_type.upper()}",
+                            anoms.description,
+                        )
+
+            analytics_dict = self._analytics_to_dict(analytics)
+            analytics_dict["scaffolding_level"] = effective_level
+            analytics_dict["scaffolding_outcome"] = scaffolding_outcome
+
+            yield {
+                "type": "done",
+                "content": full_content,
+                "sources": rag_sources,
+                "citations": rag_citations,
+                "analytics": analytics_dict,
+                "intervention": int_msg,
+                "intervention_type": int_type,
+                "quality_score": q_score,
+                "should_notify_teacher": notify,
+                "guardrail_outcome": rag_outcome,
+                "guardrail_reason": rag_reason,
+                "scaffolding_level": effective_level,
+                "scaffolding_outcome": scaffolding_outcome,
+            }
+
+        except Exception:
+            logger.exception("orchestration_stream_failed")
+            yield {
+                "type": "error",
+                "content": "Maaf, terjadi kesalahan.",
+            }
+
     async def get_group_dashboard_data(self, group_id: str) -> Dict[str, Any]:
         """Consolidated Group Dashboard logic."""
         session_id = await self._get_latest_session_id(group_id)
