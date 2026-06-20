@@ -112,12 +112,20 @@ else:
 
 ## Implementation Tasks
 
-1. **Fix `_extract_reality()`** - Update filter to use `Activity` field
-2. **Fix `_extract_plan()`** - Update filter to use `Activity == "Goal_Setting"`
-3. **Unify CaseID** - Change orchestration.py:453 to use `group_id`
-4. **Fix `_calculate_time_allocation()`** - Add null checks, use event timestamps as fallback
-5. **Add unit tests** - Create realistic event fixtures matching actual log structure
+### ✅ Completed (Field Mapping Fixes)
+1. **Fix `_extract_reality()`** - Update filter to use `Activity` field ✅
+2. **Fix `_extract_plan()`** - Update filter to use `Activity == "Goal_Setting"` ✅
+3. **Fix `_calculate_time_allocation()`** - Add null checks, use event timestamps as fallback ✅
+4. **Add unit tests** - Create realistic event fixtures matching actual log structure ✅ (22 tests, all passing)
+
+### ⏸️ Deferred (CaseID Unification)
+5. **Unify CaseID** - Change orchestration.py:453 to use `group_id`
+   - **Reason**: Requires signature change to `validate_goal` and updates to all callers
+   - **Impact**: Feature still works with current fixes, but requires manual CaseID alignment
+   - **Priority**: Low - can be done in follow-up PR
+   - **Effort**: 2-3 hours
 6. **Verify on VPS** - Run live probe, check PlanVsDiskusi chart
+   - **Status**: Paused by user request - deployment decision pending
 
 ## Risks & Mitigations
 

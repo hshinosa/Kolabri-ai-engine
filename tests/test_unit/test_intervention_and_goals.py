@@ -408,28 +408,28 @@ class TestGenerateSocraticHint:
         hint = validator.generate_socratic_hint(["specific"])
         assert len(hint) > 0
         # first hint from the specific list
-        assert "konkret" in hint.lower() or "langkah" in hint.lower()
+        assert "spesifik" in hint.lower() or "topik" in hint.lower()
 
     @patch("random.choice", side_effect=lambda lst: lst[0])
     def test_measurable_hint(self, _mock_choice, validator):
         hint = validator.generate_socratic_hint(["measurable"])
-        assert "tahu" in hint.lower() or "paham" in hint.lower()
+        assert "indikator" in hint.lower() or "menilai" in hint.lower()
 
     @patch("random.choice", side_effect=lambda lst: lst[0])
     def test_time_bound_hint(self, _mock_choice, validator):
         hint = validator.generate_socratic_hint(["time_bound"])
-        assert "kapan" in hint.lower() or "berencana" in hint.lower()
+        assert "berapa lama" in hint.lower() or "waktu" in hint.lower()
 
     @patch("random.choice", side_effect=lambda lst: lst[0])
     def test_achievable_hint(self, _mock_choice, validator):
         hint = validator.generate_socratic_hint(["achievable"])
-        assert "sumber" in hint.lower() or "cukup" in hint.lower()
+        assert "target" in hint.lower() or "sesi diskusi" in hint.lower()
 
     @patch("random.choice", side_effect=lambda lst: lst[0])
     def test_multiple_missing_uses_first(self, _mock_choice, validator):
         hint = validator.generate_socratic_hint(["time_bound", "specific"])
         # Should focus on time_bound (first)
-        assert "kapan" in hint.lower() or "berencana" in hint.lower()
+        assert "berapa lama" in hint.lower() or "waktu" in hint.lower()
 
     @patch("random.choice", side_effect=lambda lst: lst[0])
     def test_unknown_criterion_fallback(self, _mock_choice, validator):

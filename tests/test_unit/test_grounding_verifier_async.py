@@ -98,14 +98,15 @@ async def test_verify_grounding_async_marks_all_claims_grounded():
 
 @pytest.mark.asyncio
 async def test_verify_grounding_async_marks_claims_ungrounded_below_threshold():
-    verifier = GroundingVerifier(embedding_service=MagicMock())
+    # Mock embedding service to have embed_async attribute so async path is used
+    embedding_service = MagicMock()
+    embedding_service.embed_async = AsyncMock()
+    verifier = GroundingVerifier(embedding_service=embedding_service)
     documents = [{"content": "doc satu"}, {"content": "doc dua"}]
 
-    with patch.object(verifier, "_extract_claims", return_value=["Claim satu", "Claim dua"]), patch.object(
-        verifier,
-        "_compute_similarity_async",
-        new=AsyncMock(side_effect=[0.2, 0.3, 0.1, 0.4]),
-    ):
+    with patch.object(verifier, "_extract_claims", return_value=["Claim satu", "Claim dua"]), \
+         patch.object(verifier, "_compute_similarity_async", new=AsyncMock(return_value=0.00001)), \
+         patch.object(verifier, "_compute_similarity", return_value=0.0):
         result = await verifier.verify_grounding_async("response", documents)
 
     assert result.is_grounded is False

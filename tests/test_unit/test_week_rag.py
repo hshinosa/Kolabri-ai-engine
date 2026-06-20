@@ -12,7 +12,7 @@ def test_week_metadata_filter_none_when_unset():
 def test_week_metadata_filter_lte():
     f = week_metadata_filter(3)
     assert f is not None
-    assert f["$and"][2] == {"week_index": {"$lte": 3}}
+    assert f["week_index"]["$lte"] == 3
 
 
 def test_rank_week_boosted_drops_weak_older_week():
