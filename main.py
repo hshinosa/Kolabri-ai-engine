@@ -62,46 +62,6 @@ def _init_rate_limiter() -> Limiter:
 limiter: Optional[Limiter] = None
 
 
-async def silence_monitor_task():
-    """Background task to monitor silent groups and trigger interventions."""
-    logger.info("Silence monitor background task started")
-    logic_listener = get_logic_listener()
-    notification_service = get_notification_service()
-
-    while True:
-        try:
-            # Check every 60 seconds
-            await asyncio.sleep(60)
-
-            silent_groups = logic_listener.get_all_silent_groups()
-
-            if silent_groups:
-                logger.info(f"Detected {len(silent_groups)} silent groups")
-
-                for group_id in silent_groups:
-                    trigger = logic_listener.check_silence(group_id)
-
-                    if trigger.should_intervene:
-                        # Send to Core-API
-                        success = await notification_service.send_intervention(
-                            group_id=group_id,
-                            message=trigger.suggested_message,
-                            intervention_type="silence",
-                            metadata=trigger.metadata,
-                        )
-
-                        if success:
-                            # Update timestamp so we don't spam every minute
-                            # We reset the last message time to 'now' to start the 10m timer again
-                            logic_listener.update_last_message_time(group_id)
-
-        except asyncio.CancelledError:
-            logger.info("Silence monitor task cancelled")
-            break
-        except Exception as e:
-            logger.error(f"Error in silence monitor task: {str(e)}")
-            await asyncio.sleep(10)  # Wait a bit before retry on error
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -133,18 +93,11 @@ async def lifespan(app: FastAPI):
     limiter = _init_rate_limiter()
     app.state.limiter = limiter
 
-    # Start background monitor
-    monitor_task = asyncio.create_task(silence_monitor_task())
 
     yield
 
     # Shutdown
     logger.info("Shutting down Kolabri AI-Engine")
-    monitor_task.cancel()
-    try:
-        await monitor_task
-    except asyncio.CancelledError:
-        pass
 
     await mongo_logger.close()
 

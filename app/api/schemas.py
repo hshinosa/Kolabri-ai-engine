@@ -158,12 +158,11 @@ class AskRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     course_id: str = Field(..., min_length=1, max_length=64)
     user_name: Optional[str] = Field(None, max_length=100)
-    chat_space_id: Optional[str] = Field(None, max_length=64)
     guardrail_policy: Optional[dict[str, Any]] = None
     scaffolding_config: Optional[dict[str, Any]] = None
     provider_context: Optional[ProviderContextV1] = None
 
-    @field_validator("course_id", "chat_space_id")
+    @field_validator("course_id")
     @classmethod
     def validate_no_path_traversal(cls, v: Optional[str]) -> Optional[str]:
         if v and any(char in v for char in ["..", "/", "\\"]):

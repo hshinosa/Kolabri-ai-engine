@@ -958,6 +958,25 @@ class Orchestrator:
         except:
             return {"status": "unknown"}
 
+    def check_group_status(self, group_id: str, topic: Optional[str] = None) -> Dict[str, Any]:
+        """Check group status via Logic Listener."""
+        return self.logic_listener.get_group_status(group_id)
+
+    async def track_participation(self, group_id: str, user_id: str) -> Dict[str, Any]:
+        """Track user participation via Logic Listener."""
+        await self.logic_listener.track_participation(group_id, user_id)
+        return {"status": "ok"}
+
+    async def update_last_message_time(self, group_id: str) -> Dict[str, Any]:
+        """Update last message timestamp via Logic Listener."""
+        await self.logic_listener.update_last_message_time(group_id)
+        return {"status": "ok"}
+
+    async def set_group_topic(self, group_id: str, topic: str) -> Dict[str, Any]:
+        """Set group topic via Logic Listener."""
+        await self.logic_listener.set_group_topic(group_id, topic)
+        return {"status": "ok"}
+
 
 # Singleton
 _orchestrator = None

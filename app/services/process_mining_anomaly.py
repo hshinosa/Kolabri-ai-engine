@@ -263,7 +263,7 @@ class ProcessMiningAnomalyDetector:
             # Group events by chat space
             chat_space_events = defaultdict(list)
             for event in events:
-                chat_space_id = event.get("chatSpaceId")
+                chat_space_id = event.get("CaseID")
                 if chat_space_id:
                     chat_space_events[chat_space_id].append(event)
             
@@ -272,7 +272,7 @@ class ProcessMiningAnomalyDetector:
             for chat_space_id, session_events in chat_space_events.items():
                 group_id = session_events[0].get("groupId") if session_events else None
                 anomaly = await self.detect_session_anomalies(
-                    case_id=chat_space_id,
+                    chat_space_id=chat_space_id,
                     group_id=group_id
                 )
                 if anomaly.has_anomalies:
@@ -703,7 +703,7 @@ class ProcessMiningAnomalyDetector:
             # Group by chat space
             chat_space_events = defaultdict(list)
             for event in events:
-                chat_space_id = event.get("chatSpaceId")
+                chat_space_id = event.get("CaseID")
                 if chat_space_id:
                     chat_space_events[chat_space_id].append(event)
             
