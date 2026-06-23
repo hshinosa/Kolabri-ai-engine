@@ -228,7 +228,7 @@ def test_ask_endpoint_success(client):
                 "query": "What is React?",
                 "course_id": "test_course",
                 "user_name": "test_user",
-                "chat_space_id": "test_space",
+                "session_discussion_id": "test_space",
             },
         )
 
@@ -422,7 +422,7 @@ def test_validate_goal_success(mock_get_orchestrator, client):
         data={
             "goal_text": "Membuat prototype aplikasi dalam 5 hari dengan 3 fitur CRUD",
             "user_id": "user_1",
-            "chat_space_id": "space_1",
+            "session_discussion_id": "space_1",
         },
     )
 
@@ -453,7 +453,7 @@ def test_validate_goal_invalid(mock_get_orchestrator, client):
         data={
             "goal_text": "belajar React",
             "user_id": "user_1",
-            "chat_space_id": "space_1",
+            "session_discussion_id": "space_1",
         },
     )
 
@@ -570,16 +570,16 @@ def test_export_group_activity_csv(mock_get_export_service, client):
 
 
 @patch("app.api.routes.analytics.get_export_service")
-def test_export_chat_space_csv(mock_get_export_service, client):
-    """Test /export/activity/chat-space/{id} returns CSV."""
+def test_export_session_discussion_csv(mock_get_export_service, client):
+    """Test /export/activity/session-discussion/{id} returns CSV."""
     mock_service = MagicMock()
-    mock_service.export_chat_space_activity = AsyncMock(
+    mock_service.export_session_discussion_activity = AsyncMock(
         return_value="Student,Messages,Score\nuser_1,10,75\n"
     )
     mock_get_export_service.return_value = mock_service
 
     response = client.get(
-        "/api/export/activity/chat-space/space_1?include_detailed=true"
+        "/api/export/activity/session-discussion/space_1?include_detailed=true"
     )
 
     assert response.status_code == 200

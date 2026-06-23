@@ -135,7 +135,7 @@ def mock_mongo_logger() -> Mock:
 
     # Mock get_activity_logs
     async def mock_get_logs(**kwargs):
-        case_id = kwargs.get("case_id") or kwargs.get("chat_space_id")
+        case_id = kwargs.get("case_id") or kwargs.get("session_discussion_id")
         resource = kwargs.get("resource") or kwargs.get("user_id")
 
         if not case_id and not resource:

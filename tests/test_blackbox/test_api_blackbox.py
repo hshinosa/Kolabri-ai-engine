@@ -305,7 +305,7 @@ class TestValidRequestsWithoutBackends:
             data={
                 "goal_text": "Membuat 5 halaman laporan dalam 3 hari",
                 "user_id": "user-1",
-                "chat_space_id": "space-1",
+                "session_discussion_id": "space-1",
             },
         )
 

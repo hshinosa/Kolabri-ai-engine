@@ -41,7 +41,7 @@ def resolve_provider_context(
 class GoalValidateBody(BaseModel):
     goal_text: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
-    chat_space_id: str = Field(..., min_length=1)
+    session_discussion_id: str = Field(..., min_length=1)
     week_context: Optional[dict[str, Any]] = None
     provider_context: Optional[ProviderContextV1] = None
     group_id: Optional[str] = None
@@ -60,14 +60,14 @@ async def validate_goal(request: Request):
             body = GoalValidateBody.model_validate(await request.json())
             goal_text = body.goal_text
             user_id = body.user_id
-            chat_space_id = body.chat_space_id
+            session_discussion_id = body.session_discussion_id
             group_id = body.group_id
             week_context = body.week_context
         else:
             form = await request.form()
             goal_text = str(form.get("goal_text", ""))
             user_id = str(form.get("user_id", ""))
-            chat_space_id = str(form.get("chat_space_id", ""))
+            session_discussion_id = str(form.get("session_discussion_id", ""))
             group_id = str(form.get("group_id", "")) or None
             raw_ctx = form.get("week_context")
             if raw_ctx:
@@ -80,7 +80,7 @@ async def validate_goal(request: Request):
         result = await orchestrator.validate_goal(
             goal_text=goal_text,
             user_id=user_id,
-            chat_space_id=chat_space_id,
+            session_discussion_id=session_discussion_id,
             week_context=week_context,
             group_id=group_id,
         )
@@ -88,7 +88,7 @@ async def validate_goal(request: Request):
         logger.info(
             "goal_validation_api",
             user_id=user_id,
-            chat_space_id=chat_space_id,
+            session_discussion_id=session_discussion_id,
             is_valid=result.get("is_valid"),
             score=result.get("score"),
         )

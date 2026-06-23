@@ -74,7 +74,7 @@ def _evt(
     content="",
     sender_type=None,
     engagement=None,
-    chat_space_id=None,
+    session_discussion_id=None,
     lexical_variety=0,
 ):
     """Build a mock event dict."""
@@ -95,8 +95,8 @@ def _evt(
         e["engagement"] = engagement
     else:
         e["engagement"] = {"isHigherOrder": False, "lexicalVariety": lexical_variety}
-    if chat_space_id:
-        e["chatSpaceId"] = chat_space_id
+    if session_discussion_id:
+        e["sessionDiscussionId"] = session_discussion_id
     return e
 
 
@@ -591,25 +591,25 @@ def test_course_metrics_empty(detector):
 def test_course_metrics_normal(detector):
     events = [
         _evt(
-            chat_space_id="cs1",
+            session_discussion_id="cs1",
             created_at=NOW,
             user_id="u1",
             engagement={"isHigherOrder": True, "lexicalVariety": 0.5},
         ),
         _evt(
-            chat_space_id="cs1",
+            session_discussion_id="cs1",
             created_at=NOW + timedelta(minutes=15),
             user_id="u1",
             engagement={"isHigherOrder": False, "lexicalVariety": 0.3},
         ),
         _evt(
-            chat_space_id="cs2",
+            session_discussion_id="cs2",
             created_at=NOW,
             user_id="u2",
             engagement={"isHigherOrder": False, "lexicalVariety": 0.6},
         ),
         _evt(
-            chat_space_id="cs2",
+            session_discussion_id="cs2",
             created_at=NOW + timedelta(minutes=20),
             user_id="u2",
             engagement={"isHigherOrder": False, "lexicalVariety": 0.4},
@@ -623,8 +623,8 @@ def test_course_metrics_normal(detector):
 
 
 @pytest.mark.unit
-def test_course_metrics_no_chatspace_id(detector):
-    """Events without chatSpaceId → no sessions grouped."""
+def test_course_metrics_no_sessiondiscussion_id(detector):
+    """Events without sessionDiscussionId → no sessions grouped."""
     events = [_evt(created_at=NOW)]
     m = detector._calculate_course_metrics(events)
     assert m["total_sessions"] == 0
@@ -633,7 +633,7 @@ def test_course_metrics_no_chatspace_id(detector):
 @pytest.mark.unit
 def test_course_metrics_exception(detector):
     """Force exception via broken event data."""
-    events = [{"chatSpaceId": "cs1"}]  # no createdAt for session metrics
+    events = [{"sessionDiscussionId": "cs1"}]  # no createdAt for session metrics
     m = detector._calculate_course_metrics(events)
     # session_metrics calculation will fail → returns {}
     # but course_metrics itself catches and returns {}
@@ -646,7 +646,7 @@ def test_course_metrics_exception_in_aggregation(detector):
     with patch.object(
         detector, "_calculate_session_metrics", side_effect=RuntimeError("boom")
     ):
-        events = [{"chatSpaceId": "cs1", "createdAt": datetime(2025, 1, 1)}]
+        events = [{"sessionDiscussionId": "cs1", "createdAt": datetime(2025, 1, 1)}]
         m = detector._calculate_course_metrics(events)
     assert m == {}
 
@@ -775,10 +775,10 @@ async def test_course_anomalies_no_events(detector, mongo_mock):
 async def test_course_anomalies_no_session_anomalies(detector, mongo_mock):
     """Events exist but no anomalies in any session."""
     mongo_mock.get_activity_logs_by_course.return_value = [
-        _evt(chat_space_id="cs1", group_id="g1", created_at=NOW),
+        _evt(session_discussion_id="cs1", group_id="g1", created_at=NOW),
     ]
     # detect_session_anomalies is called with case_id kwarg which doesn't match
-    # the actual parameter name chat_space_id. This will cause a TypeError that
+    # the actual parameter name session_discussion_id. This will cause a TypeError that
     # gets caught by the outer except. Let's mock detect_session_anomalies instead.
     no_anomaly = AnomalyDetectionResult(
         has_anomalies=False,
@@ -804,8 +804,8 @@ async def test_course_anomalies_no_session_anomalies(detector, mongo_mock):
 async def test_course_anomalies_with_anomalies_high_severity(detector, mongo_mock):
     """More than 50% sessions have anomalies → high severity."""
     mongo_mock.get_activity_logs_by_course.return_value = [
-        _evt(chat_space_id="cs1", group_id="g1", created_at=NOW),
-        _evt(chat_space_id="cs2", group_id="g2", created_at=NOW),
+        _evt(session_discussion_id="cs1", group_id="g1", created_at=NOW),
+        _evt(session_discussion_id="cs2", group_id="g2", created_at=NOW),
     ]
     anomaly_result = AnomalyDetectionResult(
         has_anomalies=True,
@@ -839,9 +839,9 @@ async def test_course_anomalies_with_anomalies_high_severity(detector, mongo_moc
 async def test_course_anomalies_medium_severity(detector, mongo_mock):
     """Fewer than 50% sessions have anomalies → medium severity."""
     mongo_mock.get_activity_logs_by_course.return_value = [
-        _evt(chat_space_id="cs1", group_id="g1", created_at=NOW),
-        _evt(chat_space_id="cs2", group_id="g2", created_at=NOW),
-        _evt(chat_space_id="cs3", group_id="g3", created_at=NOW),
+        _evt(session_discussion_id="cs1", group_id="g1", created_at=NOW),
+        _evt(session_discussion_id="cs2", group_id="g2", created_at=NOW),
+        _evt(session_discussion_id="cs3", group_id="g3", created_at=NOW),
     ]
     call_count = 0
 
@@ -885,13 +885,13 @@ async def test_course_anomalies_medium_severity(detector, mongo_mock):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_course_anomalies_events_without_chatspace(detector, mongo_mock):
-    """Events without chatSpaceId → no sessions grouped → no anomalies path."""
+async def test_course_anomalies_events_without_sessiondiscussion(detector, mongo_mock):
+    """Events without sessionDiscussionId → no sessions grouped → no anomalies path."""
     mongo_mock.get_activity_logs_by_course.return_value = [
         {"metadata": {}, "createdAt": NOW},
     ]
     result = await detector.detect_course_anomalies("course1")
-    # No chatSpaceId → chat_space_events is empty → session_anomalies is empty
+    # No sessionDiscussionId → session_discussion_events is empty → session_anomalies is empty
     assert result.has_anomalies is False
     assert result.anomaly_type == "none"
 

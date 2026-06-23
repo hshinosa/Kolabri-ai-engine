@@ -761,22 +761,22 @@ class TestExportGroupActivityEndpoint:
 
 
 # ###########################################################################
-#  GET /export/activity/chat-space/{chat_space_id}
+#  GET /export/activity/session-discussion/{session_discussion_id}
 # ###########################################################################
 
 
 @pytest.mark.integration
-class TestExportChatSpaceActivityEndpoint:
-    """GET /api/export/activity/chat-space/{chat_space_id}"""
+class TestExportSessionDiscussionActivityEndpoint:
+    """GET /api/export/activity/session-discussion/{session_discussion_id}"""
 
     def test_success_csv(self, client):
         csv = "Student,Messages\nAlice,10\n"
         with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
-            svc.export_chat_space_activity = AsyncMock(return_value=csv)
+            svc.export_session_discussion_activity = AsyncMock(return_value=csv)
             m.return_value = svc
 
-            resp = client.get("/api/export/activity/chat-space/cs1")
+            resp = client.get("/api/export/activity/session-discussion/cs1")
 
         assert resp.status_code == 200
         assert "text/csv" in resp.headers["content-type"]
@@ -787,22 +787,22 @@ class TestExportChatSpaceActivityEndpoint:
         csv = "col\nval\n"
         with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
-            svc.export_chat_space_activity = AsyncMock(return_value=csv)
+            svc.export_session_discussion_activity = AsyncMock(return_value=csv)
             m.return_value = svc
 
-            client.get("/api/export/activity/chat-space/cs1?include_detailed=false")
+            client.get("/api/export/activity/session-discussion/cs1?include_detailed=false")
 
-        svc.export_chat_space_activity.assert_awaited_once_with(
-            chat_space_id="cs1", include_detailed=False
+        svc.export_session_discussion_activity.assert_awaited_once_with(
+            session_discussion_id="cs1", include_detailed=False
         )
 
     def test_export_error_returns_500(self, client):
         with patch("app.api.routes.analytics.get_export_service") as m:
             svc = MagicMock()
-            svc.export_chat_space_activity = AsyncMock(side_effect=Exception("oops"))
+            svc.export_session_discussion_activity = AsyncMock(side_effect=Exception("oops"))
             m.return_value = svc
 
-            resp = client.get("/api/export/activity/chat-space/cs1")
+            resp = client.get("/api/export/activity/session-discussion/cs1")
 
         assert resp.status_code == 500
 
@@ -869,7 +869,7 @@ class TestGoalValidateEndpoint:
                 data={
                     "goal_text": "Build CRUD app in 5 days",
                     "user_id": "u1",
-                    "chat_space_id": "s1",
+                    "session_discussion_id": "s1",
                 },
             )
 
@@ -897,7 +897,7 @@ class TestGoalValidateEndpoint:
                 data={
                     "goal_text": "Learn stuff",
                     "user_id": "u1",
-                    "chat_space_id": "s1",
+                    "session_discussion_id": "s1",
                 },
             )
 
@@ -916,7 +916,7 @@ class TestGoalValidateEndpoint:
                 data={
                     "goal_text": "Goal",
                     "user_id": "u1",
-                    "chat_space_id": "s1",
+                    "session_discussion_id": "s1",
                 },
             )
 

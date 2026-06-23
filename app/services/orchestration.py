@@ -598,12 +598,12 @@ class Orchestrator:
         self,
         goal_text: str,
         user_id: str,
-        chat_space_id: str,
+        session_discussion_id: str,
         week_context: Optional[Dict[str, Any]] = None,
         group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        # BUG-01+02: Use group_id for CaseID and state tracking (not chat_space_id)
-        tracking_key = group_id or chat_space_id
+        # BUG-01+02: Use group_id for CaseID and state tracking (not session_discussion_id)
+        tracking_key = group_id or session_discussion_id
         res = self.goal_validator.validate_goal(goal_text)
         week_off_topic = False
         if week_context and week_context.get("week_title"):
@@ -647,7 +647,7 @@ class Orchestrator:
             self._group_smart_streak[tracking_key] = streak
 
         # Log event
-        session_id = chat_space_id.split("_")[-1] if "_" in chat_space_id else "1"
+        session_id = session_discussion_id.split("_")[-1] if "_" in session_discussion_id else "1"
         case_id = f"{tracking_key}_session_{session_id}"
         await asyncio.gather(
             self.mongo_logger.log_activity(

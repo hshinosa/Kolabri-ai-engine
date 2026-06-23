@@ -46,7 +46,7 @@ def _make_request(**overrides):
         "query": "Apa itu machine learning?",
         "course_id": "course-1",
         "user_name": "tester",
-        "chat_space_id": "space-1",
+        "session_discussion_id": "space-1",
         "request_id": "req-1",
     }
     data.update(overrides)

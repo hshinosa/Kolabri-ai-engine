@@ -238,7 +238,7 @@ class TestMongoDBLogger:
     async def test_get_activity_logs_legacy_params(self, mongo_logger, mock_mongo_client):
         """Test get_activity_logs with legacy parameters."""
         logs = await mongo_logger.get_activity_logs(
-            chat_space_id="chat_1",
+            session_discussion_id="chat_1",
             user_id="user_1"
         )
         

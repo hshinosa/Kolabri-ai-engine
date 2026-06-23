@@ -117,9 +117,9 @@ async def test_export_group_is_hot_false_branch():
     assert rows[0]["engagement_score"] >= 0
 
 
-# export 136->135: chat space is_hot false
+# export 136->135: session discussion is_hot false
 @pytest.mark.asyncio
-async def test_export_chat_space_is_hot_false_branch():
+async def test_export_session_discussion_is_hot_false_branch():
     from app.services.export_service import ExportService
 
     svc = ExportService()
@@ -133,7 +133,7 @@ async def test_export_chat_space_is_hot_false_branch():
                     },
                 ]
             )
-            rows = await svc.aggregate_activity_by_chat_space("s1")
+            rows = await svc.aggregate_activity_by_session_discussion("s1")
     assert rows[0]["hot_count"] == 0
 
 

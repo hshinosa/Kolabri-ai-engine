@@ -351,7 +351,7 @@ async def test_export_aggregate_by_group_computes_engagement_score():
 
 
 @pytest.mark.asyncio
-async def test_export_aggregate_by_chat_space_sorts_by_message_count():
+async def test_export_aggregate_by_session_discussion_sorts_by_message_count():
     from app.services.export_service import ExportService
 
     svc = ExportService()
@@ -364,7 +364,7 @@ async def test_export_aggregate_by_chat_space_sorts_by_message_count():
                     {"Resource": "u2", "Attributes": {"original_text": "c"}},
                 ]
             )
-            rows = await svc.aggregate_activity_by_chat_space("space-1")
+            rows = await svc.aggregate_activity_by_session_discussion("space-1")
     assert rows[0]["user_id"] == "u2"
 
 

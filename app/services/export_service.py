@@ -86,12 +86,12 @@ class ExportService:
             )
             raise
     
-    async def aggregate_activity_by_chat_space(
+    async def aggregate_activity_by_session_discussion(
         self,
-        chat_space_id: str
+        session_discussion_id: str
     ) -> List[Dict[str, Any]]:
         """
-        Agregasi metrik keterlibatan mahasiswa per chat space.
+        Agregasi metrik keterlibatan mahasiswa per session discussion.
         Synchronized with XES Schema (PascalCase).
         """
         await self.initialize()
@@ -99,7 +99,7 @@ class ExportService:
         try:
             from app.services.repositories import ActivityLogRepository
             repo = ActivityLogRepository(self._db)
-            logs = await repo.list_student_messages_for_case(chat_space_id)
+            logs = await repo.list_student_messages_for_case(session_discussion_id)
             
             user_metrics = {}
             for log in logs:
@@ -125,14 +125,14 @@ class ExportService:
                     m["hot_count"] += 1
                 m["total_lexical_variety"] += attr.get("lexical_variety", 0.0)
             
-            _finalize_chat_space_metrics(user_metrics)
+            _finalize_session_discussion_metrics(user_metrics)
             
             return sorted(user_metrics.values(), key=lambda x: x["message_count"], reverse=True)
             
         except Exception as e:
             logger.error(
                 "aggregation_failed",
-                chat_space_id=chat_space_id,
+                session_discussion_id=session_discussion_id,
                 error=str(e)
             )
             raise
@@ -268,7 +268,7 @@ class ExportService:
     ) -> str:
         """
         Export group activity with per-student breakdown.
-        CSV structure focuses on what each student did across all chat spaces in the group.
+        CSV structure focuses on what each student did across all session discussions in the group.
         """
         await self.initialize()
         
@@ -302,29 +302,29 @@ class ExportService:
                     writer.writerow([]) # Empty line between students
                 
                 writer.writerow([f">>> MAHASISWA: {student_id} <<<"])
-                writer.writerow(["Chat Space (Session)", "Waktu", "Pesan", "Kualitas HOT", "Variasi Leksikal"])
+                writer.writerow(["Session Discussion (Session)", "Waktu", "Pesan", "Kualitas HOT", "Variasi Leksikal"])
                 current_student = student_id
             
             writer.writerow([case_id, timestamp, text[:100], is_hot, lexical])
             
         return output.getvalue()
     
-    async def export_chat_space_activity(
+    async def export_session_discussion_activity(
         self,
-        chat_space_id: str,
+        session_discussion_id: str,
         include_detailed: bool = True
     ) -> str:
         """
-        Export chat space activity to CSV string.
+        Export session discussion activity to CSV string.
         
         Args:
-            chat_space_id: ID chat space
+            session_discussion_id: ID session discussion
             include_detailed: Include detailed metrics
             
         Returns:
             CSV string
         """
-        user_metrics = await self.aggregate_activity_by_chat_space(chat_space_id)
+        user_metrics = await self.aggregate_activity_by_session_discussion(session_discussion_id)
         return self.generate_csv_string(user_metrics, include_detailed)
     
     async def close(self) -> None:
@@ -348,7 +348,7 @@ def _finalize_group_engagement_metrics(user_metrics: Dict[str, Dict[str, Any]]) 
             m["engagement_score"] = round((hot_p * 0.4) + (m["avg_lexical_variety"] * 60), 1)
 
 
-def _finalize_chat_space_metrics(user_metrics: Dict[str, Dict[str, Any]]) -> None:
+def _finalize_session_discussion_metrics(user_metrics: Dict[str, Dict[str, Any]]) -> None:
     for m in user_metrics.values():
         if m["message_count"] > 0:
             m["avg_lexical_variety"] = round(

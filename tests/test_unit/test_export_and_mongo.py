@@ -358,10 +358,10 @@ class TestMongoDBLoggerGetActivityLogs:
         assert query == {}
 
     @pytest.mark.asyncio
-    async def test_get_logs_legacy_chat_space_id(self):
-        """Legacy kwarg chat_space_id maps to CaseID."""
+    async def test_get_logs_legacy_session_discussion_id(self):
+        """Legacy kwarg session_discussion_id maps to CaseID."""
         logger, mock_db = self._make_logger_with_cursor([])
-        await logger.get_activity_logs(chat_space_id="legacy_cs")
+        await logger.get_activity_logs(session_discussion_id="legacy_cs")
         query = mock_db.activity_logs.find.call_args[0][0]
         assert query["CaseID"] == "legacy_cs"
 
@@ -375,9 +375,9 @@ class TestMongoDBLoggerGetActivityLogs:
 
     @pytest.mark.asyncio
     async def test_get_logs_case_id_takes_priority_over_legacy(self):
-        """case_id parameter takes priority over chat_space_id kwarg."""
+        """case_id parameter takes priority over session_discussion_id kwarg."""
         logger, mock_db = self._make_logger_with_cursor([])
-        await logger.get_activity_logs(case_id="primary", chat_space_id="legacy")
+        await logger.get_activity_logs(case_id="primary", session_discussion_id="legacy")
         query = mock_db.activity_logs.find.call_args[0][0]
         assert query["CaseID"] == "primary"
 
@@ -886,11 +886,11 @@ class TestExportServiceAggregateByGroup:
 
 
 @pytest.mark.unit
-class TestExportServiceAggregateByChatSpace:
-    """Tests for ExportService.aggregate_activity_by_chat_space()."""
+class TestExportServiceAggregateBySessionDiscussion:
+    """Tests for ExportService.aggregate_activity_by_session_discussion()."""
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_multi_user(self, export_svc):
+    async def test_aggregate_session_discussion_multi_user(self, export_svc):
         """Multiple users, sorted by message_count desc."""
         svc, _, mock_db = export_svc
 
@@ -925,7 +925,7 @@ class TestExportServiceAggregateByChatSpace:
         )
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        result = await svc.aggregate_activity_by_chat_space("cs1")
+        result = await svc.aggregate_activity_by_session_discussion("cs1")
 
         assert len(result) == 2
         # Sorted by message_count desc, U1 (2) before U2 (1)
@@ -939,7 +939,7 @@ class TestExportServiceAggregateByChatSpace:
         assert result[1]["message_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_empty(self, export_svc):
+    async def test_aggregate_session_discussion_empty(self, export_svc):
         """No logs → empty result."""
         svc, _, mock_db = export_svc
 
@@ -947,21 +947,21 @@ class TestExportServiceAggregateByChatSpace:
         mock_cursor.to_list = AsyncMock(return_value=[])
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        result = await svc.aggregate_activity_by_chat_space("cs_empty")
+        result = await svc.aggregate_activity_by_session_discussion("cs_empty")
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_error_raises(self, export_svc):
+    async def test_aggregate_session_discussion_error_raises(self, export_svc):
         """Exception during aggregation is re-raised."""
         svc, _, mock_db = export_svc
 
         mock_db.activity_logs.find.side_effect = Exception("timeout")
 
         with pytest.raises(Exception, match="timeout"):
-            await svc.aggregate_activity_by_chat_space("cs_fail")
+            await svc.aggregate_activity_by_session_discussion("cs_fail")
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_query_exact_match(self, export_svc):
+    async def test_aggregate_session_discussion_query_exact_match(self, export_svc):
         """CaseID is exact match (not regex like group)."""
         svc, _, mock_db = export_svc
 
@@ -969,14 +969,14 @@ class TestExportServiceAggregateByChatSpace:
         mock_cursor.to_list = AsyncMock(return_value=[])
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        await svc.aggregate_activity_by_chat_space("exact_cs_id")
+        await svc.aggregate_activity_by_session_discussion("exact_cs_id")
 
         call_args = mock_db.activity_logs.find.call_args[0][0]
         assert call_args["CaseID"] == "exact_cs_id"
         assert call_args["Activity"] == "Student_Message"
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_unknown_resource(self, export_svc):
+    async def test_aggregate_session_discussion_unknown_resource(self, export_svc):
         """Missing Resource defaults to 'unknown'."""
         svc, _, mock_db = export_svc
 
@@ -986,12 +986,12 @@ class TestExportServiceAggregateByChatSpace:
         )
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        result = await svc.aggregate_activity_by_chat_space("cs_x")
+        result = await svc.aggregate_activity_by_session_discussion("cs_x")
         assert result[0]["user_id"] == "unknown"
 
     @pytest.mark.asyncio
-    async def test_aggregate_chat_space_missing_attributes(self, export_svc):
-        """Log with empty Attributes in chat space aggregation."""
+    async def test_aggregate_session_discussion_missing_attributes(self, export_svc):
+        """Log with empty Attributes in session discussion aggregation."""
         svc, _, mock_db = export_svc
 
         mock_cursor = AsyncMock()
@@ -1000,7 +1000,7 @@ class TestExportServiceAggregateByChatSpace:
         )
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        result = await svc.aggregate_activity_by_chat_space("cs_y")
+        result = await svc.aggregate_activity_by_session_discussion("cs_y")
         assert result[0]["message_count"] == 1
         assert result[0]["word_count"] == 0
         assert result[0]["hot_count"] == 0
@@ -1443,12 +1443,12 @@ class TestExportServiceGroupActivityDetailed:
 
 
 @pytest.mark.unit
-class TestExportServiceChatSpaceActivity:
-    """Tests for ExportService.export_chat_space_activity()."""
+class TestExportServiceSessionDiscussionActivity:
+    """Tests for ExportService.export_session_discussion_activity()."""
 
     @pytest.mark.asyncio
-    async def test_export_chat_space_returns_csv(self, export_svc):
-        """export_chat_space_activity delegates to aggregate + generate_csv_string."""
+    async def test_export_session_discussion_returns_csv(self, export_svc):
+        """export_session_discussion_activity delegates to aggregate + generate_csv_string."""
         svc, _, mock_db = export_svc
 
         mock_cursor = AsyncMock()
@@ -1466,14 +1466,14 @@ class TestExportServiceChatSpaceActivity:
         )
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        csv_str = await svc.export_chat_space_activity("cs1", include_detailed=True)
+        csv_str = await svc.export_session_discussion_activity("cs1", include_detailed=True)
 
         assert "Student Name" in csv_str
         assert "U1" in csv_str
         assert "--- TOTAL ---" in csv_str
 
     @pytest.mark.asyncio
-    async def test_export_chat_space_simple_mode(self, export_svc):
+    async def test_export_session_discussion_simple_mode(self, export_svc):
         """include_detailed=False produces simple CSV."""
         svc, _, mock_db = export_svc
 
@@ -1492,22 +1492,22 @@ class TestExportServiceChatSpaceActivity:
         )
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        csv_str = await svc.export_chat_space_activity("cs2", include_detailed=False)
+        csv_str = await svc.export_session_discussion_activity("cs2", include_detailed=False)
 
         # Simple mode does not have "User ID" column
         assert "User ID" not in csv_str
         assert "U2" in csv_str
 
     @pytest.mark.asyncio
-    async def test_export_chat_space_empty(self, export_svc):
-        """Empty chat space → header-only CSV."""
+    async def test_export_session_discussion_empty(self, export_svc):
+        """Empty session discussion → header-only CSV."""
         svc, _, mock_db = export_svc
 
         mock_cursor = AsyncMock()
         mock_cursor.to_list = AsyncMock(return_value=[])
         mock_db.activity_logs.find.return_value = mock_cursor
 
-        csv_str = await svc.export_chat_space_activity("cs_empty")
+        csv_str = await svc.export_session_discussion_activity("cs_empty")
 
         assert "Student Name" in csv_str
         assert "--- TOTAL ---" not in csv_str

@@ -56,7 +56,7 @@ class TestGoalValidation:
                 data={
                     "goal_text": "Menganalisis dampak perubahan iklim terhadap ekosistem laut",
                     "user_id": "student-1",
-                    "chat_space_id": "cs-1",
+                    "session_discussion_id": "cs-1",
                 },
             )
 
@@ -86,7 +86,7 @@ class TestGoalValidation:
                 data={
                     "goal_text": "Belajar tentang iklim",
                     "user_id": "student-1",
-                    "chat_space_id": "cs-1",
+                    "session_discussion_id": "cs-1",
                 },
             )
 
@@ -101,7 +101,7 @@ class TestGoalValidation:
             "/api/goals/validate",
             data={
                 "user_id": "student-1",
-                "chat_space_id": "cs-1",
+                "session_discussion_id": "cs-1",
             },
         )
         assert response.status_code == 200

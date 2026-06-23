@@ -142,7 +142,7 @@ class ComprehensiveIntegrationTest:
                 await logger.log_activity({
                     "userId": "test-user-001",
                     "groupId": "test-group-001",
-                    "chatSpaceId": "test-chat-001",
+                    "sessionDiscussionId": "test-chat-001",
                     "senderId": "test-user-001",
                     "senderName": "Test User",
                     "senderType": "student",
@@ -172,7 +172,7 @@ class ComprehensiveIntegrationTest:
             start = time.time()
             try:
                 logs = await logger.get_activity_logs(
-                    chat_space_id="test-chat-001",
+                    session_discussion_id="test-chat-001",
                     limit=10
                 )
                 duration = (time.time() - start) * 1000
@@ -192,7 +192,7 @@ class ComprehensiveIntegrationTest:
             try:
                 await logger.log_silence({
                     "groupId": "test-group-001",
-                    "chatSpaceId": "test-chat-001",
+                    "sessionDiscussionId": "test-chat-001",
                     "silenceDuration": 300,
                     "interventionSent": True
                 })
@@ -402,20 +402,20 @@ class ComprehensiveIntegrationTest:
                 
                 # Test with actual MongoDB connection
                 result = await detector.detect_session_anomalies(
-                    chat_space_id="test-chat-001"
+                    session_discussion_id="test-chat-001"
                 )
                 
                 duration = (time.time() - start) * 1000
                 if result.has_anomalies:
-                    self.log_result("GET /process-mining/anomalies/{chat_space_id}", TestStatus.PASS, duration,
+                    self.log_result("GET /process-mining/anomalies/{session_discussion_id}", TestStatus.PASS, duration,
                                   f"Anomaly detection successful (type: {result.anomaly_type}, severity: {result.severity})")
                 else:
-                    self.log_result("GET /process-mining/anomalies/{chat_space_id}", TestStatus.PASS, duration,
+                    self.log_result("GET /process-mining/anomalies/{session_discussion_id}", TestStatus.PASS, duration,
                                   "No anomalies detected (healthy session)")
                 
             except Exception as e:
                 duration = (time.time() - start) * 1000
-                self.log_result("GET /process-mining/anomalies/{chat_space_id}", TestStatus.FAIL, duration,
+                self.log_result("GET /process-mining/anomalies/{session_discussion_id}", TestStatus.FAIL, duration,
                               error=str(e))
             
             # Test 7: Plan vs Reality endpoint
@@ -433,21 +433,21 @@ class ComprehensiveIntegrationTest:
                 
                 # Test with actual MongoDB connection
                 result = await analyzer.analyze_session(
-                    chat_space_id="test-chat-001"
+                    session_discussion_id="test-chat-001"
                 )
                 
                 duration = (time.time() - start) * 1000
                 if result:
                     alignment_score = result.comparison.get('alignment_score', 0)
-                    self.log_result("GET /plan-vs-reality/{chat_space_id}", TestStatus.PASS, duration,
+                    self.log_result("GET /plan-vs-reality/{session_discussion_id}", TestStatus.PASS, duration,
                                   f"Plan vs Reality analysis successful (alignment_score: {alignment_score:.2f})")
                 else:
-                    self.log_result("GET /plan-vs-reality/{chat_space_id}", TestStatus.PASS, duration,
+                    self.log_result("GET /plan-vs-reality/{session_discussion_id}", TestStatus.PASS, duration,
                                   "Analysis completed (no data available)")
                 
             except Exception as e:
                 duration = (time.time() - start) * 1000
-                self.log_result("GET /plan-vs-reality/{chat_space_id}", TestStatus.FAIL, duration,
+                self.log_result("GET /plan-vs-reality/{session_discussion_id}", TestStatus.FAIL, duration,
                               error=str(e))
             
             # Test 8: Efficiency Guard Statistics endpoint
@@ -687,7 +687,7 @@ class ComprehensiveIntegrationTest:
                     await logger.log_activity({
                         "userId": f"test-user-{i % 10}",
                         "groupId": "test-group-001",
-                        "chatSpaceId": "test-chat-001",
+                        "sessionDiscussionId": "test-chat-001",
                         "senderId": f"test-user-{i % 10}",
                         "senderName": f"Test User {i % 10}",
                         "senderType": "student",

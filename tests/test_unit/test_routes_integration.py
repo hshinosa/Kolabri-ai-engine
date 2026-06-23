@@ -384,7 +384,7 @@ def test_validate_goal_success(mock_get_orchestrator):
         data={
             "goal_text": "Belajar AI minggu ini",
             "user_id": "u1",
-            "chat_space_id": "c1",
+            "session_discussion_id": "c1",
         },
     )
 
@@ -404,7 +404,7 @@ def test_validate_goal_failure(mock_get_orchestrator):
 
     response = client.post(
         "/goals/validate",
-        data={"goal_text": "Belajar AI", "user_id": "u1", "chat_space_id": "c1"},
+        data={"goal_text": "Belajar AI", "user_id": "u1", "session_discussion_id": "c1"},
     )
 
     assert response.status_code == 500
@@ -707,15 +707,15 @@ def test_export_group_activity_csv_success(mock_get_export_service):
 
 
 @patch("app.api.routes.analytics.get_export_service")
-def test_export_chat_space_activity_csv_success(mock_get_export_service):
+def test_export_session_discussion_activity_csv_success(mock_get_export_service):
     mock_service = MagicMock()
-    mock_service.export_chat_space_activity = AsyncMock(
+    mock_service.export_session_discussion_activity = AsyncMock(
         return_value="user,msg\nu1,halo\n"
     )
     mock_get_export_service.return_value = mock_service
 
     response = client.get(
-        "/export/activity/chat-space/chat-1", params={"include_detailed": "true"}
+        "/export/activity/session-discussion/chat-1", params={"include_detailed": "true"}
     )
 
     assert response.status_code == 200
@@ -1741,14 +1741,14 @@ def test_export_group_activity_csv_failure(mock_get_export_service):
 
 
 @patch("app.api.routes.analytics.get_export_service")
-def test_export_chat_space_activity_csv_failure(mock_get_export_service):
+def test_export_session_discussion_activity_csv_failure(mock_get_export_service):
     mock_service = MagicMock()
-    mock_service.export_chat_space_activity = AsyncMock(
+    mock_service.export_session_discussion_activity = AsyncMock(
         side_effect=Exception("export chat failed")
     )
     mock_get_export_service.return_value = mock_service
 
-    response = client.get("/export/activity/chat-space/chat-1")
+    response = client.get("/export/activity/session-discussion/chat-1")
 
     assert response.status_code == 500
     assert response.json()["detail"] == "INTERNAL_SERVER_ERROR"

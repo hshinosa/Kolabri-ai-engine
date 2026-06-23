@@ -68,14 +68,14 @@ class PlanVsRealityAnalyzer:
     
     async def analyze_session(
         self,
-        chat_space_id: str,
+        session_discussion_id: str,
         goal_id: Optional[str] = None
     ) -> PlanVsRealityResult:
         """
         Analyze plan vs reality for a learning session.
         
         Args:
-            chat_space_id: The chat space ID to analyze
+            session_discussion_id: The session discussion ID to analyze
             goal_id: Optional goal ID for specific goal analysis
             
         Returns:
@@ -84,13 +84,13 @@ class PlanVsRealityAnalyzer:
         try:
             # Get event logs for the session
             events = await self.mongo_logger.get_activity_logs(
-                case_id=chat_space_id,
+                case_id=session_discussion_id,
                 limit=1000
             )
             
             if not events:
                 return PlanVsRealityResult(
-                    case_id=chat_space_id,
+                    case_id=session_discussion_id,
                     goal_id=goal_id,
                     plan={},
                     reality={},
@@ -120,7 +120,7 @@ class PlanVsRealityAnalyzer:
             recommendations = self._generate_recommendations(plan, reality, comparison)
             
             return PlanVsRealityResult(
-                case_id=chat_space_id,
+                case_id=session_discussion_id,
                 goal_id=goal_id,
                 plan=plan,
                 reality=reality,
@@ -134,11 +134,11 @@ class PlanVsRealityAnalyzer:
         except Exception:
             logger.exception(
                 "plan_vs_reality_analysis_failed",
-                chat_space_id=chat_space_id
+                session_discussion_id=session_discussion_id
             )
 
             return PlanVsRealityResult(
-                case_id=chat_space_id,
+                case_id=session_discussion_id,
                 goal_id=goal_id,
                 plan={},
                 reality={},

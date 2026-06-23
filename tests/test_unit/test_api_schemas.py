@@ -252,14 +252,14 @@ class TestAskRequest:
             query="Explain quantum physics",
             course_id="course_1",
             user_name="John",
-            chat_space_id="chat_1",
+            session_discussion_id="chat_1",
         )
         assert request.query == "Explain quantum physics"
         assert request.course_id == "course_1"
 
     def test_ask_request_rejects_path_traversal(self):
         with pytest.raises(ValidationError):
-            AskRequest(query="q", course_id="..\\x", chat_space_id=None)
+            AskRequest(query="q", course_id="..\\x", session_discussion_id=None)
 
     def test_ask_request_accepts_provider_context(self):
         request = AskRequest(

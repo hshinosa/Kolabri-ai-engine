@@ -102,7 +102,7 @@ async def test_export_group_hot_false_branch_in_aggregation_loop():
 
 
 @pytest.mark.asyncio
-async def test_export_chat_space_hot_false_branch():
+async def test_export_session_discussion_hot_false_branch():
     from app.services.export_service import ExportService
 
     svc = ExportService()
@@ -116,7 +116,7 @@ async def test_export_chat_space_hot_false_branch():
                     },
                 ]
             )
-            rows = await svc.aggregate_activity_by_chat_space("s")
+            rows = await svc.aggregate_activity_by_session_discussion("s")
     assert rows[0]["hot_count"] == 0
 
 

@@ -189,28 +189,28 @@ async def export_group_activity_csv(
 
 
 @router.get(
-    "/export/activity/chat-space/{chat_space_id}",
+    "/export/activity/session-discussion/{session_discussion_id}",
     tags=["Analytics"],
-    summary="Export chat space activity data to CSV",
+    summary="Export session discussion activity data to CSV",
 )
-async def export_chat_space_activity_csv(
-    chat_space_id: str = Path(
-        ..., pattern=_SAFE_ID_REGEX, description="Alphanumeric chat space identifier"
+async def export_session_discussion_activity_csv(
+    session_discussion_id: str = Path(
+        ..., pattern=_SAFE_ID_REGEX, description="Alphanumeric session discussion identifier"
     ),
     include_detailed: bool = Query(True, description="Include detailed metrics"),
 ):
     try:
         export_service = get_export_service()
 
-        csv_data = await export_service.export_chat_space_activity(
-            chat_space_id=chat_space_id, include_detailed=include_detailed
+        csv_data = await export_service.export_session_discussion_activity(
+            session_discussion_id=session_discussion_id, include_detailed=include_detailed
         )
 
-        filename = _safe_csv_filename("activity_session", chat_space_id)
+        filename = _safe_csv_filename("activity_session", session_discussion_id)
 
         logger.info(
             "activity_csv_exported",
-            chat_space_id=chat_space_id,
+            session_discussion_id=session_discussion_id,
             size_bytes=len(csv_data),
             detailed=include_detailed,
         )
@@ -222,7 +222,7 @@ async def export_chat_space_activity_csv(
         )
 
     except Exception:
-        logger.exception("csv_export_failed", chat_space_id=chat_space_id)
+        logger.exception("csv_export_failed", session_discussion_id=session_discussion_id)
         raise
 
 

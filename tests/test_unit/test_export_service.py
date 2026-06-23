@@ -4,7 +4,7 @@ Unit Tests for Export Service
 
 Tests for activity data export functionality including:
 - MongoDB aggregation by group
-- MongoDB aggregation by chat space
+- MongoDB aggregation by session discussion
 - CSV generation with XES Schema compliance
 - Error handling
 """
@@ -77,8 +77,8 @@ async def test_export_initialize_once(export_service):
 # ==============================================================================
 
 @pytest.mark.asyncio
-async def test_aggregate_activity_by_chat_space_success(export_service):
-    """Test successful aggregation by chat space."""
+async def test_aggregate_activity_by_session_discussion_success(export_service):
+    """Test successful aggregation by session discussion."""
     service, mock_client, mock_db, mock_settings = export_service
     
     # Mock MongoDB response
@@ -104,7 +104,7 @@ async def test_aggregate_activity_by_chat_space_success(export_service):
     
     mock_db.activity_logs.find.return_value = mock_cursor
     
-    result = await service.aggregate_activity_by_chat_space("chat_123")
+    result = await service.aggregate_activity_by_session_discussion("chat_123")
     
     assert len(result) == 1
     student = result[0]
@@ -183,7 +183,7 @@ async def test_aggregate_activity_by_group_empty(export_service):
 
 
 @pytest.mark.asyncio
-async def test_export_chat_space_activity_integration(export_service):
+async def test_export_session_discussion_activity_integration(export_service):
     """Test full integration from aggregation to CSV."""
     service, mock_client, mock_db, _ = export_service
     
@@ -194,7 +194,7 @@ async def test_export_chat_space_activity_integration(export_service):
     ])
     mock_db.activity_logs.find.return_value = mock_cursor
     
-    csv_string = await service.export_chat_space_activity("chat_123")
+    csv_string = await service.export_session_discussion_activity("chat_123")
     
     assert "U1" in csv_string
     assert "1" in csv_string # count

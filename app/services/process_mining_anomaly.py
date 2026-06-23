@@ -90,14 +90,14 @@ class ProcessMiningAnomalyDetector:
     
     async def detect_session_anomalies(
         self,
-        chat_space_id: str,
+        session_discussion_id: str,
         group_id: Optional[str] = None
     ) -> AnomalyDetectionResult:
         """
         Detect anomalies in a learning session.
         
         Args:
-            chat_space_id: The chat space ID to analyze
+            session_discussion_id: The session discussion ID to analyze
             group_id: Optional group ID for context
             
         Returns:
@@ -106,7 +106,7 @@ class ProcessMiningAnomalyDetector:
         try:
             # Get event logs for the session
             events = await self.mongo_logger.get_activity_logs(
-                case_id=chat_space_id,
+                case_id=session_discussion_id,
                 limit=1000
             )
             
@@ -212,7 +212,7 @@ class ProcessMiningAnomalyDetector:
         except Exception:
             logger.exception(
                 "session_anomaly_detection_failed",
-                chat_space_id=chat_space_id
+                session_discussion_id=session_discussion_id
             )
 
             return AnomalyDetectionResult(
@@ -260,19 +260,19 @@ class ProcessMiningAnomalyDetector:
                     timestamp=datetime.now()
                 )
             
-            # Group events by chat space
-            chat_space_events = defaultdict(list)
+            # Group events by session discussion
+            session_discussion_events = defaultdict(list)
             for event in events:
-                chat_space_id = event.get("CaseID")
-                if chat_space_id:
-                    chat_space_events[chat_space_id].append(event)
+                session_discussion_id = event.get("CaseID")
+                if session_discussion_id:
+                    session_discussion_events[session_discussion_id].append(event)
             
             # Detect anomalies in each session
             session_anomalies = []
-            for chat_space_id, session_events in chat_space_events.items():
+            for session_discussion_id, session_events in session_discussion_events.items():
                 group_id = session_events[0].get("groupId") if session_events else None
                 anomaly = await self.detect_session_anomalies(
-                    chat_space_id=chat_space_id,
+                    session_discussion_id=session_discussion_id,
                     group_id=group_id
                 )
                 if anomaly.has_anomalies:
@@ -324,13 +324,13 @@ class ProcessMiningAnomalyDetector:
             }
             metrics["anomaly_summary"] = dict(anomaly_types)
             metrics["sessions_with_anomalies"] = len(session_anomalies)
-            metrics["total_sessions"] = len(chat_space_events)
+            metrics["total_sessions"] = len(session_discussion_events)
             
             return AnomalyDetectionResult(
                 has_anomalies=True,
                 anomaly_type="course_level",
-                severity="high" if len(session_anomalies) > len(chat_space_events) * 0.5 else "medium",
-                description=f"Detected anomalies in {len(session_anomalies)}/{len(chat_space_events)} sessions",
+                severity="high" if len(session_anomalies) > len(session_discussion_events) * 0.5 else "medium",
+                description=f"Detected anomalies in {len(session_anomalies)}/{len(session_discussion_events)} sessions",
                 affected_users=affected_users,
                 affected_groups=affected_groups,
                 metrics=metrics,
@@ -700,16 +700,16 @@ class ProcessMiningAnomalyDetector:
             if not events:
                 return {}
             
-            # Group by chat space
-            chat_space_events = defaultdict(list)
+            # Group by session discussion
+            session_discussion_events = defaultdict(list)
             for event in events:
-                chat_space_id = event.get("CaseID")
-                if chat_space_id:
-                    chat_space_events[chat_space_id].append(event)
+                session_discussion_id = event.get("CaseID")
+                if session_discussion_id:
+                    session_discussion_events[session_discussion_id].append(event)
             
             # Calculate metrics for each session
             session_metrics = []
-            for chat_space_id, session_events in chat_space_events.items():
+            for session_discussion_id, session_events in session_discussion_events.items():
                 metrics = self._calculate_session_metrics(session_events)
                 session_metrics.append(metrics)
             

@@ -102,16 +102,16 @@ async def test_export_group_skips_zero_message_count_in_final_loop():
     assert rows == []
 
 
-# export 136->135 — chat space tanpa pesan
+# export 136->135 — session discussion tanpa pesan
 @pytest.mark.asyncio
-async def test_export_chat_space_skips_zero_message_avg():
+async def test_export_session_discussion_skips_zero_message_avg():
     from app.services.export_service import ExportService
 
     svc = ExportService()
     with patch.object(svc, "initialize", new_callable=AsyncMock):
         with patch("app.services.repositories.ActivityLogRepository") as Repo:
             Repo.return_value.list_student_messages_for_case = AsyncMock(return_value=[])
-            rows = await svc.aggregate_activity_by_chat_space("s1")
+            rows = await svc.aggregate_activity_by_session_discussion("s1")
     assert rows == []
 
 

@@ -173,12 +173,12 @@ class TestAggregateActivityByGroup:
             mock_logger.error.assert_called_once()
 
 
-class TestAggregateActivityByChatSpace:
-    """Test aggregate_activity_by_chat_space method."""
+class TestAggregateActivityBySessionDiscussion:
+    """Test aggregate_activity_by_session_discussion method."""
     
     @pytest.mark.asyncio
-    async def test_aggregate_by_chat_space(self, export_service):
-        """Test aggregating activity by chat space."""
+    async def test_aggregate_by_session_discussion(self, export_service):
+        """Test aggregating activity by session discussion."""
         with patch.object(export_service, 'initialize', new_callable=AsyncMock):
             mock_cursor = AsyncMock()
             mock_logs = [
@@ -204,7 +204,7 @@ class TestAggregateActivityByChatSpace:
             export_service._db = MagicMock()
             export_service._db.activity_logs.find.return_value = mock_cursor
             
-            result = await export_service.aggregate_activity_by_chat_space("chat1")
+            result = await export_service.aggregate_activity_by_session_discussion("chat1")
             
             assert len(result) == 2
             # Results sorted by message_count descending
@@ -213,7 +213,7 @@ class TestAggregateActivityByChatSpace:
             assert "user2" in user_ids
     
     @pytest.mark.asyncio
-    async def test_aggregate_by_chat_space_empty(self, export_service):
+    async def test_aggregate_by_session_discussion_empty(self, export_service):
         """Test aggregating with no logs."""
         with patch.object(export_service, 'initialize', new_callable=AsyncMock):
             mock_cursor = AsyncMock()
@@ -222,12 +222,12 @@ class TestAggregateActivityByChatSpace:
             export_service._db = MagicMock()
             export_service._db.activity_logs.find.return_value = mock_cursor
             
-            result = await export_service.aggregate_activity_by_chat_space("chat1")
+            result = await export_service.aggregate_activity_by_session_discussion("chat1")
             
             assert result == []
     
     @pytest.mark.asyncio
-    async def test_aggregate_by_chat_space_error(self, export_service):
+    async def test_aggregate_by_session_discussion_error(self, export_service):
         """Test aggregating with error."""
         with patch.object(export_service, 'initialize', new_callable=AsyncMock), \
              patch('app.services.export_service.logger') as mock_logger:
@@ -236,7 +236,7 @@ class TestAggregateActivityByChatSpace:
             export_service._db.activity_logs.find.side_effect = Exception("Error")
             
             with pytest.raises(Exception):
-                await export_service.aggregate_activity_by_chat_space("chat1")
+                await export_service.aggregate_activity_by_session_discussion("chat1")
             
             mock_logger.error.assert_called_once()
 
@@ -411,20 +411,20 @@ class TestExportGroupActivityDetailed:
             assert "group1" in result
 
 
-class TestExportChatSpaceActivity:
-    """Test export_chat_space_activity method."""
+class TestExportSessionDiscussionActivity:
+    """Test export_session_discussion_activity method."""
     
     @pytest.mark.asyncio
-    async def test_export_chat_space(self, export_service):
-        """Test exporting chat space activity."""
+    async def test_export_session_discussion(self, export_service):
+        """Test exporting session discussion activity."""
         with patch.object(export_service, 'initialize', new_callable=AsyncMock), \
-             patch.object(export_service, 'aggregate_activity_by_chat_space', new_callable=AsyncMock) as mock_aggregate, \
+             patch.object(export_service, 'aggregate_activity_by_session_discussion', new_callable=AsyncMock) as mock_aggregate, \
              patch.object(export_service, 'generate_csv_string') as mock_generate:
             
             mock_aggregate.return_value = [{"user_id": "user1", "message_count": 5}]
             mock_generate.return_value = "CSV content"
             
-            result = await export_service.export_chat_space_activity("chat1", include_detailed=True)
+            result = await export_service.export_session_discussion_activity("chat1", include_detailed=True)
             
             mock_aggregate.assert_called_once_with("chat1")
             mock_generate.assert_called_once_with(mock_aggregate.return_value, True)

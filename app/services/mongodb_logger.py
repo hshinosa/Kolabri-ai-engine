@@ -112,7 +112,7 @@ class MongoDBLogger:
         try:
             query = {}
             # Handle both new and legacy parameters
-            cid = case_id or kwargs.get("chat_space_id")
+            cid = case_id or kwargs.get("session_discussion_id")
             if cid: query["CaseID"] = cid
             
             res = resource or kwargs.get("user_id")

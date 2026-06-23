@@ -168,7 +168,7 @@ class AIEngineUser(HttpUser):
         self.course_id = f"course_{random.randint(1, 10)}"
         self.user_id = f"user_{random.randint(1000, 9999)}"
         self.group_id = f"group_{random.randint(1, 50)}"
-        self.chat_space_id = f"space_{random.randint(1, 200)}"
+        self.session_discussion_id = f"space_{random.randint(1, 200)}"
 
     def on_start(self):
         """Called when user starts."""
@@ -212,7 +212,7 @@ class AIEngineUser(HttpUser):
             "query": query,
             "course_id": self.course_id,
             "user_name": f"Student {self.user_id}",
-            "chat_space_id": self.chat_space_id,
+            "session_discussion_id": self.session_discussion_id,
         }
 
         with self.client.post(
@@ -253,7 +253,7 @@ class AIEngineUser(HttpUser):
             "query": long_query,
             "course_id": self.course_id,
             "user_name": f"Student {self.user_id}",
-            "chat_space_id": self.chat_space_id,
+            "session_discussion_id": self.session_discussion_id,
         }
 
         with self.client.post(
@@ -457,7 +457,7 @@ class SteadyStateUser(HttpUser):
         super().__init__(*args, **kwargs)
         self.course_id = f"course_{random.randint(1, 10)}"
         self.user_id = f"user_{random.randint(1000, 9999)}"
-        self.chat_space_id = f"space_{random.randint(1, 200)}"
+        self.session_discussion_id = f"space_{random.randint(1, 200)}"
 
     def on_start(self):
         apply_auth_to_client(self.client)
@@ -475,7 +475,7 @@ class SteadyStateUser(HttpUser):
             "query": query,
             "course_id": self.course_id,
             "user_name": f"Student {self.user_id}",
-            "chat_space_id": self.chat_space_id,
+            "session_discussion_id": self.session_discussion_id,
         }
         self.client.post("/api/ask", json=payload, name="/ask (steady)", timeout=60)
 
