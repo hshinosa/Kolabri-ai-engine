@@ -37,8 +37,7 @@ from app.services.document_processing.models import ProcessedDocument, Processed
 VISION_AVAILABLE = False
 
 # PDF Processing
-from pypdf import PdfReader
-import fitz  # PyMuPDF for image extraction
+import fitz  # PyMuPDF for text, image extraction, and OCR prep
 
 # Document Processing
 from docx import Document as DocxDocument
