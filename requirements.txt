@@ -46,7 +46,6 @@ tenacity>=9.0.0
 
 # Data Processing
 numpy>=1.26.0,<2.0.0
-orjson>=3.10.0
 
 # Security & Rate Limiting
 slowapi>=0.1.9
