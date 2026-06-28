@@ -9,20 +9,24 @@ at the API level since the system works with any OpenAI-compatible endpoint.
 """
 
 import pytest
-from httpx import AsyncClient
+import httpx
 from fastapi import status
 
 
+TEST_HEADERS = {"Authorization": "Bearer test-token"}
+
+
 @pytest.mark.asyncio
-async def test_test_provider_openai_success(client: AsyncClient):
+async def test_test_provider_openai_success(async_httpx_client: httpx.AsyncClient):
     """Test successful OpenAI provider test."""
-    response = await client.post(
+    response = await async_httpx_client.post(
         "/api/admin/test-provider",
         json={
             "name": "openai",
             "apiKey": "test-key",
             "testPrompt": "Hello",
         },
+        headers=TEST_HEADERS,
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -32,9 +36,9 @@ async def test_test_provider_openai_success(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_test_provider_any_compatible(client: AsyncClient):
+async def test_test_provider_any_compatible(async_httpx_client: httpx.AsyncClient):
     """Test that any provider name works (OpenAI-compatible approach)."""
-    response = await client.post(
+    response = await async_httpx_client.post(
         "/api/admin/test-provider",
         json={
             "name": "custom-provider",
@@ -42,6 +46,7 @@ async def test_test_provider_any_compatible(client: AsyncClient):
             "baseUrl": "https://api.example.com/v1",
             "testPrompt": "Hello",
         },
+        headers=TEST_HEADERS,
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -51,9 +56,12 @@ async def test_test_provider_any_compatible(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_models_openai(client: AsyncClient):
+async def test_get_models_openai(async_httpx_client: httpx.AsyncClient):
     """Test fetching OpenAI models."""
-    response = await client.get("/api/admin/providers/openai/models")
+    response = await async_httpx_client.get(
+        "/api/admin/providers/openai/models",
+        headers=TEST_HEADERS,
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -63,9 +71,12 @@ async def test_get_models_openai(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_models_anthropic(client: AsyncClient):
+async def test_get_models_anthropic(async_httpx_client: httpx.AsyncClient):
     """Test fetching Anthropic models (hardcoded list)."""
-    response = await client.get("/api/admin/providers/anthropic/models")
+    response = await async_httpx_client.get(
+        "/api/admin/providers/anthropic/models",
+        headers=TEST_HEADERS,
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -74,9 +85,12 @@ async def test_get_models_anthropic(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_models_with_refresh(client: AsyncClient):
+async def test_get_models_with_refresh(async_httpx_client: httpx.AsyncClient):
     """Test fetching models with cache refresh."""
-    response = await client.get("/api/admin/providers/openai/models?refresh=true")
+    response = await async_httpx_client.get(
+        "/api/admin/providers/openai/models?refresh=true",
+        headers=TEST_HEADERS,
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -84,8 +98,11 @@ async def test_get_models_with_refresh(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_models_invalid_provider(client: AsyncClient):
+async def test_get_models_invalid_provider(async_httpx_client: httpx.AsyncClient):
     """Test fetching models with invalid provider."""
-    response = await client.get("/api/admin/providers/invalid/models")
+    response = await async_httpx_client.get(
+        "/api/admin/providers/invalid/models",
+        headers=TEST_HEADERS,
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST

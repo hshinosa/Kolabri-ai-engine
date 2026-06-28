@@ -103,6 +103,7 @@ sys.modules["prometheus_client"] = MagicMock()
 sys.modules["psutil"] = MagicMock()
 
 import pytest
+import pytest_asyncio
 import asyncio
 from typing import Generator, AsyncGenerator
 from unittest.mock import AsyncMock, Mock, MagicMock, patch
@@ -311,6 +312,13 @@ def app() -> FastAPI:
 
     fastapi_app.router.lifespan_context = mock_lifespan
 
+    from app.middleware.auth import require_auth
+
+    async def mock_require_auth():
+        return {"id": "test-user", "email": "test@test.com", "role": "admin"}
+
+    fastapi_app.dependency_overrides[require_auth] = mock_require_auth
+
     return fastapi_app
 
 
@@ -325,16 +333,16 @@ def test_client(app: FastAPI) -> Generator[TestClient, None, None]:
     return TestClient(app)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_httpx_client(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
     """
     Create async HTTPX client for testing FastAPI endpoints asynchronously.
 
     Required for testing endpoints that use dependencies with async operations.
     """
-    from fastapi.testclient import TestClient
-
-    async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         yield client
 
 
