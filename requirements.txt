@@ -26,14 +26,18 @@ python-docx>=1.1.0
 python-pptx>=1.0.0
 pillow>=10.0.0
 
-# OpenAI SDK (for LLM inference via OpenAI-compatible API)
+# LLM SDKs
 openai>=1.0.0
+anthropic>=0.39.0
 
 # HTTP Client
 httpx[http2]>=0.27.0
 
 # Redis Cache
 redis>=4.5.0
+
+# In-Memory Caching
+cachetools>=5.3.0
 
 # Logging
 structlog>=24.0.0
