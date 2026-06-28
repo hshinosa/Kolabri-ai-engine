@@ -2,6 +2,10 @@
 Tests for admin provider routes.
 
 Tests the /api/admin/test-provider and /api/admin/providers/{provider}/models endpoints.
+
+Note: With the unified OpenAI-compatible approach, any provider name is accepted
+as long as the base_url and api_key are valid. Provider validation is not enforced
+at the API level since the system works with any OpenAI-compatible endpoint.
 """
 
 import pytest
@@ -28,17 +32,22 @@ async def test_test_provider_openai_success(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_test_provider_invalid_provider(client: AsyncClient):
-    """Test provider test with invalid provider name."""
+async def test_test_provider_any_compatible(client: AsyncClient):
+    """Test that any provider name works (OpenAI-compatible approach)."""
     response = await client.post(
         "/api/admin/test-provider",
         json={
-            "name": "invalid-provider",
+            "name": "custom-provider",
             "apiKey": "test-key",
+            "baseUrl": "https://api.example.com/v1",
+            "testPrompt": "Hello",
         },
     )
 
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "success" in data
 
 
 @pytest.mark.asyncio
