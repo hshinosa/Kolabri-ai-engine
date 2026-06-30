@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     # RAG Configuration
     TOP_K_RESULTS: int = 7
-    SIMILARITY_THRESHOLD: float = 0.35
+    SIMILARITY_THRESHOLD: float = 0.15  # Lowered from 0.25 to further improve recall
     RAG_MIN_QUERY_WORDS: int = 3  # Minimum words for FETCH policy
     RAG_SEMANTIC_CACHE_THRESHOLD: float = 0.85
     RAG_GROUNDING_THRESHOLD: float = 0.4
@@ -139,6 +139,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    REDIS_PASSWORD: str | None = None
 
     # Efficiency Guard Configuration
     ENABLE_EFFICIENCY_GUARD: bool = True

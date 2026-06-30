@@ -209,6 +209,57 @@ class RAGPipeline:
         logger.debug("policy_decision", action="FETCH", reason="substantive_query")
         return True
 
+    def _answer_from_week_context(
+        self, query: str, week_context: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        if week_context is None:
+            return None
+
+        raw_titles = week_context.get("material_titles")
+        if not isinstance(raw_titles, list):
+            return None
+
+        titles = [
+            title.strip()
+            for title in raw_titles
+            if isinstance(title, str) and title.strip()
+        ]
+        if not titles:
+            return None
+
+        query_lower = query.lower()
+        asks_materials = "materi" in query_lower and any(
+            phrase in query_lower
+            for phrase in (
+                "apa aja",
+                "apa saja",
+                "apa yang",
+                "di sesi",
+                "sesi ini",
+                "di sini",
+                "disini",
+                "repository",
+                "dokumen",
+            )
+        )
+        if not asks_materials:
+            return None
+
+        raw_week_title = week_context.get("week_title")
+        week_title = (
+            raw_week_title.strip()
+            if isinstance(raw_week_title, str) and raw_week_title.strip()
+            else "sesi ini"
+        )
+        formatted_titles = "\n".join(f"- {title}" for title in titles[:10])
+        remaining = len(titles) - 10
+        suffix = f"\n- ...dan {remaining} materi lainnya" if remaining > 0 else ""
+        return (
+            f"Materi yang tersedia untuk {week_title}:\n"
+            f"{formatted_titles}{suffix}\n\n"
+            "Menurut kamu, dari daftar ini materi mana yang paling perlu dibahas dulu oleh kelompok?"
+        )
+
     async def query(
         self,
         query: str,
@@ -221,6 +272,7 @@ class RAGPipeline:
         guardrail_context: Optional[Dict[str, Any]] = None,
         session_week_index: Optional[int] = None,
         max_week_index: Optional[int] = None,
+        week_context: Optional[Dict[str, Any]] = None,
     ) -> RAGResult:
         """
         Execute a RAG query with Policy-Based optimization, guardrails, and efficiency caching.
@@ -236,6 +288,19 @@ class RAGPipeline:
             RAGResult with answer, sources, and action taken (FETCH/NO_FETCH)
         """
         start_time = datetime.now()
+
+        week_context_answer = self._answer_from_week_context(query, week_context)
+        if week_context_answer is not None:
+            return RAGResult(
+                answer=week_context_answer,
+                sources=[],
+                query=query,
+                tokens_used=0,
+                success=True,
+                processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                outcome="week_context",
+                reason="material_list_query",
+            )
 
         from app.services.week_rag import (
             rank_week_boosted_results,
@@ -254,6 +319,8 @@ class RAGPipeline:
             "n_results": n_results,
             "filter_metadata": effective_filter,
             "score_threshold": score_threshold,
+            "has_chat_history": bool(chat_history),
+            "history_length": len(chat_history) if chat_history else 0,
         }
 
         # Define the query execution function
@@ -342,6 +409,7 @@ class RAGPipeline:
                         prompt=no_fetch_prompt,
                         system_prompt=SYSTEM_PERSONAL_CHAT,
                         temperature=TEMPERATURE["personal_chat"],
+                        chat_history=chat_history,
                     )
 
                     processing_time = (
@@ -383,7 +451,7 @@ class RAGPipeline:
                     )
 
                     search_results = await self.vector_store.search(
-                        query=search_query,
+                        query=safe_query,
                         collection_name=collection_name,
                         n_results=plan.top_k,
                         where=effective_filter,
@@ -400,6 +468,7 @@ class RAGPipeline:
                             prompt=query,
                             system_prompt=SYSTEM_RAG_NO_CONTEXT,
                             temperature=TEMPERATURE["rag_no_context"],
+                            chat_history=chat_history,
                         )
 
                         processing_time = (
@@ -435,7 +504,9 @@ class RAGPipeline:
                     # Step 2: Format contexts & Update semantic cache
                     contexts = self._format_search_results(search_results)
                     self._last_query = query
-                    self._last_query_embedding = None  # PERF-AI-06: Invalidate cached embedding
+                    self._last_query_embedding = (
+                        None  # PERF-AI-06: Invalidate cached embedding
+                    )
                     self._last_contexts = contexts
 
                 # Step 3: Generate response with RAG
@@ -457,7 +528,7 @@ class RAGPipeline:
                     contexts=contexts,
                     chat_history=chat_history,
                     fading_level=fading_level,
-                context=scaffolding_ctx,
+                    context=scaffolding_ctx,
                 )
 
                 # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
@@ -539,6 +610,11 @@ class RAGPipeline:
                 # Step 5: Extract sources
                 sources = self._extract_sources(search_results)
                 citations = sources_to_citations(search_results)
+                logger.info(
+                    "rag_citations_extracted",
+                    num_citations=len(citations),
+                    has_citations=len(citations) > 0,
+                )
 
                 processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
@@ -606,6 +682,7 @@ class RAGPipeline:
         guardrail_context: Optional[Dict[str, Any]] = None,
         session_week_index: Optional[int] = None,
         max_week_index: Optional[int] = None,
+        week_context: Optional[Dict[str, Any]] = None,
     ):
         """Async generator for streaming RAG responses.
 
@@ -623,6 +700,19 @@ class RAGPipeline:
             {"type": "error", "content": str}    — error
         """
         from app.services.week_rag import week_metadata_filter
+
+        week_context_answer = self._answer_from_week_context(query, week_context)
+        if week_context_answer is not None:
+            yield {
+                "type": "full",
+                "content": week_context_answer,
+                "sources": [],
+                "citations": [],
+                "outcome": "week_context",
+                "reason": "material_list_query",
+            }
+            yield {"type": "done", "sources": [], "citations": []}
+            return
 
         effective_filter = filter_metadata
         week_cap = week_metadata_filter(max_week_index)
@@ -688,6 +778,7 @@ class RAGPipeline:
                     prompt=no_fetch_prompt,
                     system_prompt=SYSTEM_PERSONAL_CHAT,
                     temperature=TEMPERATURE["personal_chat"],
+                    chat_history=chat_history,
                 ):
                     yield {"type": "token", "content": chunk}
                 yield {"type": "done", "sources": [], "citations": []}
@@ -712,6 +803,7 @@ class RAGPipeline:
                     guardrail_context=guardrail_context,
                     session_week_index=session_week_index,
                     max_week_index=max_week_index,
+                    week_context=week_context,
                 )
                 yield {
                     "type": "full",

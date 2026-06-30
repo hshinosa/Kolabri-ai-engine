@@ -125,6 +125,7 @@ class Orchestrator:
                 },
                 session_week_index=kwargs.get("session_week_index"),
                 max_week_index=kwargs.get("max_week_index"),
+                week_context=kwargs.get("week_context"),
             )
             bot_reply = (
                 rag_result.answer if rag_result.success else "Maaf, terjadi kesalahan."
@@ -141,7 +142,7 @@ class Orchestrator:
             scaffolding_outcome = (
                 "applied" if scaffolding_config.get("enabled", True) else "disabled"
             )
-            
+
             student_message = {
                 "CaseID": case_id,
                 "Activity": "Student_Message",
@@ -157,7 +158,7 @@ class Orchestrator:
                     "scaffolding_trigger": False,
                 },
             }
-            
+
             bot_response = {
                 "CaseID": case_id,
                 "Activity": "Bot_Response",
@@ -179,7 +180,7 @@ class Orchestrator:
                     "scaffolding_outcome": scaffolding_outcome,
                 },
             }
-            
+
             # Write both logs in parallel to reduce latency
             await asyncio.gather(
                 self.mongo_logger.log_activity(student_message),
@@ -330,6 +331,7 @@ class Orchestrator:
                 },
                 session_week_index=kwargs.get("session_week_index"),
                 max_week_index=kwargs.get("max_week_index"),
+                week_context=kwargs.get("week_context"),
             ):
                 if event["type"] == "token":
                     full_content += event["content"]
@@ -647,7 +649,11 @@ class Orchestrator:
             self._group_smart_streak[tracking_key] = streak
 
         # Log event
-        session_id = session_discussion_id.split("_")[-1] if "_" in session_discussion_id else "1"
+        session_id = (
+            session_discussion_id.split("_")[-1]
+            if "_" in session_discussion_id
+            else "1"
+        )
         case_id = f"{tracking_key}_session_{session_id}"
         await asyncio.gather(
             self.mongo_logger.log_activity(
@@ -675,7 +681,10 @@ class Orchestrator:
                     "Timestamp": datetime.now(),
                     "Resource": f"Student_{user_id}",
                     "Lifecycle": "complete",
-                    "metadata": {"interactionType": "GOAL_SETTING", "phase": "Forethought"},
+                    "metadata": {
+                        "interactionType": "GOAL_SETTING",
+                        "phase": "Forethought",
+                    },
                     "content": goal_text,
                     "userId": user_id,
                 }
@@ -790,6 +799,7 @@ class Orchestrator:
         if not reason:
             return None
         return self._INTERVENTION_TYPE_MAP.get(reason, "prompt")
+
     async def _should_intervene(
         self, group_id: str, analytics: EngagementAnalysis, quality_score: float
     ) -> Tuple[bool, Optional[str]]:
@@ -829,17 +839,17 @@ class Orchestrator:
             }
             for m in raw_messages[-10:]
         ]
-        
+
         chat_room_id = kwargs.get("chat_room_id") or group_id
         last_intervention_time = self._last_intervention.get(group_id)
-        
+
         result = await self.intervention.analyze_and_intervene(
             messages=messages,
             topic=topic or "",
             chat_room_id=chat_room_id,
             last_intervention_time=last_intervention_time,
         )
-        
+
         if result.should_intervene:
             return result.message
         return None
@@ -958,7 +968,9 @@ class Orchestrator:
         except:
             return {"status": "unknown"}
 
-    def check_group_status(self, group_id: str, topic: Optional[str] = None) -> Dict[str, Any]:
+    def check_group_status(
+        self, group_id: str, topic: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Check group status via Logic Listener."""
         return self.logic_listener.get_group_status(group_id)
 

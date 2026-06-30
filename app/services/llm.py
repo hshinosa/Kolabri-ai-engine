@@ -9,6 +9,7 @@ from tenacity import (
     retry_if_exception_type,
     retry_if_exception,
 )
+import asyncio
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.utils.sensitive_data import sanitize_error_message
@@ -33,6 +34,7 @@ from app.services.circuit_breaker import (
     CircuitBreakerOpenError,
     get_llm_circuit_breaker,
 )
+from app.services.repositories.provider_repository import get_provider_repository
 import httpx
 
 logger = get_logger(__name__)
@@ -85,6 +87,9 @@ class OpenAILLMService:
     }
 
     def __init__(self, provider_context: Optional[Dict[str, Any]] = None):
+        if provider_context is None and settings.UNIFIED_PROVIDER_ENABLED:
+            provider_context = asyncio.run(self._fetch_provider_from_database())
+
         auth = provider_context.get("auth", {}) if provider_context else {}
         execution = provider_context.get("execution", {}) if provider_context else {}
 
@@ -123,6 +128,22 @@ class OpenAILLMService:
             max_tokens if max_tokens is not None else settings.OPENAI_MAX_TOKENS
         )
 
+    async def _fetch_provider_from_database(self) -> Optional[Dict[str, Any]]:
+        try:
+            provider_repo = await get_provider_repository()
+            provider_context = await provider_repo.get_active_provider()
+
+            if provider_context:
+                logger.info("provider_fetched_from_database")
+                return provider_context
+
+            logger.warning("no_active_provider_fallback_to_env")
+            return None
+
+        except Exception:
+            logger.exception("provider_fetch_failed_fallback_to_env")
+            return None
+
     async def close(self):
         await self._http_client.aclose()
 
@@ -133,15 +154,24 @@ class OpenAILLMService:
         context: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        chat_history: Optional[List[ChatMessage]] = None,
     ) -> LLMResponse:
         full_system = system_prompt or self.SYSTEM_PROMPTS["default"]
         if context:
             full_system += f"\n\nKonteks tambahan:\n{context}"
 
-        messages = [
+        messages: List[Dict[str, str]] = [
             {"role": "system", "content": full_system},
-            {"role": "user", "content": prompt},
         ]
+        if chat_history:
+            for m in chat_history[-10:]:
+                messages.append(
+                    {
+                        "role": m.role if m.role in ("user", "assistant") else "user",
+                        "content": m.content,
+                    }
+                )
+        messages.append({"role": "user", "content": prompt})
 
         breaker = get_llm_circuit_breaker()
         start = time.time()
@@ -199,7 +229,9 @@ class OpenAILLMService:
             min=0.01 if settings.ENV == "testing" else settings.LLM_RETRY_DELAY_BASE,
         ),
         retry=retry_if_exception_type((RateLimitError, APIConnectionError))
-        | retry_if_exception(lambda e: isinstance(e, APIError) and getattr(e, "status_code", 0) >= 500),
+        | retry_if_exception(
+            lambda e: isinstance(e, APIError) and getattr(e, "status_code", 0) >= 500
+        ),
         reraise=True,
     )
     async def _execute_with_retry(self, messages, temperature, max_tokens):
@@ -252,6 +284,7 @@ class OpenAILLMService:
         context: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        chat_history: Optional[List[ChatMessage]] = None,
     ):
         """Async generator yielding content chunks (str) via stream=True.
 
@@ -263,10 +296,18 @@ class OpenAILLMService:
         full_system = system_prompt or self.SYSTEM_PROMPTS["default"]
         if context:
             full_system += f"\n\nKonteks tambahan:\n{context}"
-        messages = [
+        messages: List[Dict[str, str]] = [
             {"role": "system", "content": full_system},
-            {"role": "user", "content": prompt},
         ]
+        if chat_history:
+            for m in chat_history[-10:]:
+                messages.append(
+                    {
+                        "role": m.role if m.role in ("user", "assistant") else "user",
+                        "content": m.content,
+                    }
+                )
+        messages.append({"role": "user", "content": prompt})
         try:
             stream = await self.client.chat.completions.create(
                 model=self.model,
@@ -293,7 +334,7 @@ class OpenAILLMService:
     ) -> LLMResponse:
         ctx_text = self._format_contexts(contexts)
         system_prompt = self.SYSTEM_PROMPTS["rag"] + "\n\n" + RAG_FEW_SHOT
-        
+
         # Add scaffolding context to system prompt if provided
         if context:
             system_prompt += f"\n\n{context}"
@@ -307,7 +348,10 @@ class OpenAILLMService:
             prompt = COT_RAG_TEMPLATE.format(contexts=ctx_text, query=query)
 
         return await self.generate(
-            prompt=prompt, system_prompt=system_prompt, temperature=TEMPERATURE["rag"]
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=TEMPERATURE["rag"],
+            chat_history=chat_history,
         )
 
     async def generate_intervention(
@@ -390,19 +434,7 @@ _llm_service = None
 
 
 def get_llm_service(provider_context: Optional[Dict[str, Any]] = None):
-    if provider_context is not None:
-        return OpenAILLMService(provider_context=provider_context)
-
-    if settings.UNIFIED_PROVIDER_ENABLED:
-        raise ValueError(
-            "provider_context is required when UNIFIED_PROVIDER_ENABLED=True. "
-            "Core-api must resolve and pass provider_context for all AI requests."
-        )
-
-    global _llm_service
-    if _llm_service is None:
-        _llm_service = OpenAILLMService()
-    return _llm_service
+    return OpenAILLMService(provider_context=provider_context)
 
 
 async def close_llm_service():

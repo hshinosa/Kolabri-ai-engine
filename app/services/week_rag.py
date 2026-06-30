@@ -4,10 +4,10 @@ from typing import Any, Dict, List, Optional
 
 
 def week_metadata_filter(max_week_index: Optional[int]) -> Optional[Dict[str, Any]]:
-    """When week cap is active, only chunks with numeric week_index <= cap."""
-    if max_week_index is None:
-        return None
-    return {"week_index": {"$lte": int(max_week_index)}}
+    """Disabled - allow searching all weeks regardless of session week."""
+    # Original filter: {"week_index": {"$lte": int(max_week_index)}}
+    # Disabled to allow RAG to search all course materials
+    return None
 
 
 def rank_week_boosted_results(

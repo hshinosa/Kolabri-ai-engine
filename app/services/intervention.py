@@ -343,21 +343,37 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """
                 ):
                     triggers["needs_summary"] = True
 
-        # Simple off-topic detection (can be enhanced with embeddings)
+        # Off-topic detection: word overlap between recent messages and topic.
+        # Skip for short conversations (greetings, follow-ups) to avoid false positives.
         if topic and len(messages) >= 5:
             recent_content = " ".join(
                 [m.get("content", "") for m in messages[-5:]]
             ).lower()
 
-            topic_words = topic.lower().split()
-            matches = sum(1 for word in topic_words if word in recent_content)
-            topic_relevance = matches / len(topic_words) if topic_words else 1
+            # Filter topic to meaningful words (len >= 3, no punctuation tokens)
+            topic_words = [
+                w for w in topic.lower().replace("&", " ").split()
+                if len(w) >= 3 and w.isalpha()
+            ]
+            if not topic_words:
+                topic_relevance = 1.0
+            else:
+                matches = sum(1 for word in topic_words if word in recent_content)
+                topic_relevance = matches / len(topic_words)
+
+            # Count content words in recent messages (skip greetings/short msgs)
+            recent_words = [
+                w for w in recent_content.replace("@ai", "").split()
+                if len(w) >= 3 and w.isalpha()
+            ]
+            if len(recent_words) < 5:
+                # Too few content words to judge relevance — skip off-topic
+                topic_relevance = 1.0
 
             triggers["off_topic_score"] = 1 - topic_relevance
-            if topic_relevance < 0.3:  # Less than 30% topic words found
+            if topic_relevance < 0.15:  # Stricter threshold to reduce false positives
                 triggers["off_topic"] = True
                 triggers["should_intervene"] = True
-
         return triggers
 
     def _select_intervention(

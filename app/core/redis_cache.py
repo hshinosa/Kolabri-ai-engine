@@ -69,8 +69,10 @@ class RedisCache:
         """Initialize Redis connection pool."""
         if self._redis is None:
             try:
+                password = getattr(settings, 'REDIS_PASSWORD', None)
+                redis_url = f"redis://:{password}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}" if password else f"redis://{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}"
                 self._redis = await redis.from_url(
-                    f"redis://{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/{REDIS_CONFIG['db']}",
+                    redis_url,
                     encoding="utf-8",
                     decode_responses=True,
                     max_connections=REDIS_CONFIG['max_connections']

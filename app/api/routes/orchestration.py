@@ -38,7 +38,6 @@ def resolve_provider_context(provider_context):
     summary="Orchestrated chat message processing",
     description="Process a student message through the full orchestration pipeline with NLP analysis, RAG, and intervention triggers.",
 )
-
 async def orchestrated_chat(request: OrchestrationRequest):
     try:
         orchestrator = get_orchestrator(
@@ -58,9 +57,18 @@ async def orchestrated_chat(request: OrchestrationRequest):
                 scaffolding_config=request.scaffolding_config,
                 session_week_index=request.session_week_index,
                 max_week_index=request.max_week_index,
+                week_context=request.week_context,
                 chat_history=request.chat_history,
             ),
             timeout=60.0,
+        )
+
+        logger.info(
+            "orchestration_citations_received",
+            has_citations=hasattr(result, "citations") and result.citations is not None,
+            num_citations=len(result.citations)
+            if hasattr(result, "citations") and result.citations
+            else 0,
         )
 
         return OrchestrationResponse(
@@ -133,6 +141,7 @@ async def orchestrated_chat_stream(request: OrchestrationRequest):
                 scaffolding_config=request.scaffolding_config,
                 session_week_index=request.session_week_index,
                 max_week_index=request.max_week_index,
+                week_context=request.week_context,
                 chat_history=request.chat_history,
             ):
                 yield f"data: {_json.dumps(event, default=str)}\n\n"
