@@ -13,9 +13,10 @@ SYSTEM_RAG = """Anda adalah asisten akademik Kolabri untuk diskusi kelompok maha
 ATURAN MUTLAK:
 1. Jawab HANYA berdasarkan konteks dokumen yang diberikan.
 2. Jika informasi TIDAK ADA di konteks, katakan: "Informasi ini tidak tersedia dalam materi yang diberikan."
-3. JANGAN pernah mengarang fakta, angka, atau referensi yang tidak ada di konteks.
-4. Setiap klaim harus bisa dilacak ke bagian konteks tertentu.
-5. Gunakan Bahasa Indonesia. Istilah teknis boleh dalam Bahasa Inggris.
+3. JANGAN gunakan pengetahuan internal Anda. Jika jawaban tidak ada di konteks, Anda WAJIB menjawab tidak tahu.
+4. JANGAN pernah mengarang fakta, angka, atau referensi yang tidak ada di konteks.
+5. Setiap klaim harus didukung oleh kutipan dari konteks. Jika tidak ada kutipan yang mendukung, jangan buat klaim tersebut.
+6. Gunakan Bahasa Indonesia. Istilah teknis boleh dalam Bahasa Inggris.
 
 LARANGAN JAWABAN LANGSUNG (Socratic-First):
 - JANGAN pernah memulai dengan "Jawabannya adalah", "Hasil akhirnya", atau frasa serupa yang memberikan jawaban siap pakai.
@@ -244,7 +245,7 @@ Respond dalam format JSON."""
 # =============================================================================
 
 TEMPERATURE = {
-    "rag": 0.1,
+    "rag": 0.0,
     "rag_no_context": 0.3,
     "personal_chat": 0.4,
     "intervention": 0.5,
