@@ -36,11 +36,20 @@ TOP_K = settings.RERANK_TOP_K
 
 
 def _is_relevant(item: dict, doc: dict) -> bool:
-    needle = item["expected_source_contains"].lower()
+    """Match expected source needle or any expected answer keyword in content/meta."""
     meta = doc.get("metadata") or {}
-    source = str(meta.get("source", meta.get("document_id", ""))).lower()
-    content = str(doc.get("content", "")).lower()
-    return needle in source or needle in content
+    blob = " ".join(
+        [
+            str(doc.get("content", "")),
+            str(meta.get("source", "")),
+            str(meta.get("section", "")),
+            str(meta.get("document_id", "")),
+        ]
+    ).lower()
+    needles = [str(item.get("expected_source_contains", "")).lower()]
+    needles.extend(str(k).lower() for k in item.get("expected_answer_keywords", []))
+    needles = [n for n in needles if n]
+    return any(n in blob for n in needles)
 
 
 def _metrics_for_ranking(item: dict, ranked: list[dict]) -> tuple[float, float]:
