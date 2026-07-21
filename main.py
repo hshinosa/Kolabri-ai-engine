@@ -171,6 +171,11 @@ from fastapi import Depends
 # Protect sensitive endpoints with Depends(require_auth)
 app.include_router(api_router, prefix="/api", dependencies=[Depends(require_auth)])
 
+# Batch RAG endpoint (high-throughput path used by tests + KOL-42 harness)
+from app.api.batch_routes import router as batch_router
+
+app.include_router(batch_router, prefix="/api", dependencies=[Depends(require_auth)])
+
 
 # ✅ SEC: KOL-145 - Exception Handlers for sanitized error responses
 # Domain-specific handler kept here. Generic handlers live in app/core/error_handlers.py.
