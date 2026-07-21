@@ -190,9 +190,15 @@ class Settings(BaseSettings):
         if self.ENV == "production":
             errors = []
 
-            # Check API keys (skip when unified provider is the source of truth)
+            # Always reject known placeholder keys (even when unified provider is on)
+            if self.OPENAI_API_KEY == "sk-kolabri":
+                errors.append(
+                    "OPENAI_API_KEY (must be set via environment, not hardcoded)"
+                )
+
+            # Check API keys (skip empty check when unified provider is source of truth)
             if not self.UNIFIED_PROVIDER_ENABLED:
-                if not self.OPENAI_API_KEY or self.OPENAI_API_KEY == "sk-kolabri":
+                if not self.OPENAI_API_KEY:
                     errors.append(
                         "OPENAI_API_KEY (must be set via environment, not hardcoded)"
                     )

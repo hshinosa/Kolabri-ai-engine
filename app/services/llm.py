@@ -94,6 +94,9 @@ class OpenAILLMService:
         self.temperature = None
         self.max_tokens = None
 
+        # Eager configure when provider_context is given or unified provider is off.
+        # UNIFIED mode stays lazy until ensure_ready() fetches provider (or env fallback).
+        # Offline eval scripts should set UNIFIED_PROVIDER_ENABLED=false.
         if provider_context is not None or not settings.UNIFIED_PROVIDER_ENABLED:
             self._configure(provider_context)
 
@@ -203,8 +206,8 @@ class OpenAILLMService:
             result = await breaker.call(
                 self._execute_with_retry,
                 messages,
-                temperature or self.temperature,
-                max_tokens or self.max_tokens,
+                self.temperature if temperature is None else temperature,
+                self.max_tokens if max_tokens is None else max_tokens,
             )
             result.response_time_ms = (time.time() - start) * 1000
             return result
@@ -337,8 +340,8 @@ class OpenAILLMService:
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=temperature or self.temperature,
-                max_tokens=max_tokens or self.max_tokens,
+                temperature=self.temperature if temperature is None else temperature,
+                max_tokens=self.max_tokens if max_tokens is None else max_tokens,
                 stream=True,
             )
             async for chunk in stream:
@@ -459,7 +462,13 @@ _llm_service = None
 
 
 def get_llm_service(provider_context: Optional[Dict[str, Any]] = None):
-    return OpenAILLMService(provider_context=provider_context)
+    """Return shared LLM service (singleton) unless a one-off provider context is given."""
+    global _llm_service
+    if provider_context is not None:
+        return OpenAILLMService(provider_context=provider_context)
+    if _llm_service is None:
+        _llm_service = OpenAILLMService()
+    return _llm_service
 
 
 async def close_llm_service():
