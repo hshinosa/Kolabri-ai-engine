@@ -39,6 +39,8 @@ def llm_service(mock_openai_client):
             llm_module.settings, "SCAFFOLDING_MINIMAL_THRESHOLD", 0.7
         ), patch.object(
             llm_module.settings, "ENV", "testing"
+        ), patch.object(
+            llm_module.settings, "UNIFIED_PROVIDER_ENABLED", False
         ):
             yield OpenAILLMService()
 
@@ -72,6 +74,8 @@ class TestOpenAILLMService:
                 llm_module.settings, "OPENAI_TEMPERATURE", 0.7
             ), patch.object(
                 llm_module.settings, "OPENAI_MAX_TOKENS", 2048
+            ), patch.object(
+                llm_module.settings, "UNIFIED_PROVIDER_ENABLED", False
             ):
                 service = OpenAILLMService()
         assert service.client is not None
@@ -80,7 +84,9 @@ class TestOpenAILLMService:
         assert service.max_tokens == 2048
 
     def test_init_no_api_key(self):
-        with patch.object(llm_module.settings, "OPENAI_API_KEY", ""):
+        with patch.object(llm_module.settings, "OPENAI_API_KEY", ""), patch.object(
+            llm_module.settings, "UNIFIED_PROVIDER_ENABLED", False
+        ):
             with pytest.raises(ValueError, match="OPENAI_API_KEY is required"):
                 OpenAILLMService()
 

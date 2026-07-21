@@ -130,6 +130,7 @@ def test_ask_question_pipeline_exception(mock_rag):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_success(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=make_llm_response("Halo juga", 77)
@@ -157,6 +158,7 @@ def test_personal_chat_forwards_provider_context(mock_get_llm, mock_settings):
     mock_settings.UNIFIED_PROVIDER_PERSONAL_CHAT = True
 
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=make_llm_response("Halo juga", 77)
@@ -196,6 +198,7 @@ def test_personal_chat_uses_legacy_path_when_feature_flag_disabled(
     mock_settings.UNIFIED_PROVIDER_PERSONAL_CHAT = False
 
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=make_llm_response("Halo juga", 77)
@@ -233,6 +236,7 @@ def test_personal_chat_uses_legacy_path_when_feature_flag_disabled(
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_failure(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         side_effect=Exception("llm failed")
@@ -251,6 +255,7 @@ def test_personal_chat_failure(mock_get_llm):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_stream_success(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=make_stream(["Halo", " dunia"])
@@ -270,6 +275,7 @@ def test_personal_chat_stream_success(mock_get_llm):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_stream_failure_event(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         side_effect=Exception("stream failed")
@@ -1164,6 +1170,7 @@ def test_ask_question_success_with_sources_without_page(mock_rag):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_stream_includes_history_messages(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=make_stream(["Hai"])

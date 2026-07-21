@@ -377,8 +377,8 @@ class TestGetLogicListener:
             with patch('app.services.logic_listener.get_mongo_logger') as mock_mongo:
                 mock_mongo.return_value = MagicMock()
                 
-                listener1 = get_logic_listener()
-                listener2 = get_logic_listener()
+                listener1 = logic_listener.get_logic_listener()
+                listener2 = logic_listener.get_logic_listener()
                 
                 assert listener1 is listener2
     
@@ -392,7 +392,7 @@ class TestGetLogicListener:
             with patch('app.services.logic_listener.get_mongo_logger') as mock_mongo:
                 mock_mongo.return_value = MagicMock()
                 
-                listener = get_logic_listener()
+                listener = logic_listener.get_logic_listener()
                 
                 assert listener is not None
-                assert isinstance(listener, LogicListener)
+                assert isinstance(listener, logic_listener.LogicListener)

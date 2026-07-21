@@ -97,6 +97,8 @@ def _evt(
         e["engagement"] = {"isHigherOrder": False, "lexicalVariety": lexical_variety}
     if session_discussion_id:
         e["sessionDiscussionId"] = session_discussion_id
+        # Runtime groups sessions by CaseID (see process_mining_anomaly)
+        e["CaseID"] = session_discussion_id
     return e
 
 
@@ -646,7 +648,13 @@ def test_course_metrics_exception_in_aggregation(detector):
     with patch.object(
         detector, "_calculate_session_metrics", side_effect=RuntimeError("boom")
     ):
-        events = [{"sessionDiscussionId": "cs1", "createdAt": datetime(2025, 1, 1)}]
+        events = [
+            {
+                "sessionDiscussionId": "cs1",
+                "CaseID": "cs1",
+                "createdAt": datetime(2025, 1, 1),
+            }
+        ]
         m = detector._calculate_course_metrics(events)
     assert m == {}
 

@@ -10,9 +10,9 @@ def test_week_metadata_filter_none_when_unset():
 
 
 def test_week_metadata_filter_lte():
+    # Product decision: week filter disabled so RAG can search all course materials.
     f = week_metadata_filter(3)
-    assert f is not None
-    assert f["week_index"]["$lte"] == 3
+    assert f is None
 
 
 def test_rank_week_boosted_drops_weak_older_week():

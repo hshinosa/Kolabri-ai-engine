@@ -106,6 +106,7 @@ def llm_service_stream():
         mock_settings.LLM_TIMEOUT_CONNECT_SECONDS = 5.0
         mock_settings.LLM_TIMEOUT_READ_SECONDS = 45.0
         mock_settings.LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS = 1
+        mock_settings.UNIFIED_PROVIDER_ENABLED = False
 
         mock_client = MagicMock()
         mock_openai.return_value = mock_client

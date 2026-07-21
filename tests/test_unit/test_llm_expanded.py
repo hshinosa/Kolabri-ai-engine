@@ -78,7 +78,7 @@ async def test_get_goal_refinement_suggestion(llm_service):
     response = await llm_service.get_goal_refinement_suggestion("Goal", [])
     assert response.success is True
     assert response.content == "Refinement"
-def test_get_llm_service_returns_fresh_instances():
+def test_get_llm_service_returns_singleton_instances():
     llm_module._llm_service = None
     with patch("app.services.llm.httpx.AsyncClient"), \
          patch("app.services.llm.AsyncOpenAI"):
@@ -89,4 +89,4 @@ def test_get_llm_service_returns_fresh_instances():
         ):
             s1 = get_llm_service()
             s2 = get_llm_service()
-    assert s1 is not s2
+    assert s1 is s2

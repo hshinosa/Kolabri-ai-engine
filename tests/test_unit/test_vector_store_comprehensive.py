@@ -309,11 +309,11 @@ class TestGetVectorStore:
     def test_get_vector_store_singleton(self):
         vector_store._vector_store = None
 
-        store1 = get_vector_store()
-        store2 = get_vector_store()
+        store1 = vector_store.get_vector_store()
+        store2 = vector_store.get_vector_store()
 
         assert store1 is store2
-        assert isinstance(store1, VectorStoreService)
+        assert isinstance(store1, vector_store.VectorStoreService)
 
     def test_get_vector_store_returns_existing_instance(self):
         existing = VectorStoreService()

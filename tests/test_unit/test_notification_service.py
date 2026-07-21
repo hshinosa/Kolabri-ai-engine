@@ -261,15 +261,12 @@ class TestGetNotificationService:
     
     def test_get_notification_service_singleton(self):
         """Test get_notification_service returns singleton."""
-        # Clear singleton first
         from app.services import notification_service
         notification_service._notification_service = None
-        
-        service1 = get_notification_service()
-        service2 = get_notification_service()
-        
+        service1 = notification_service.get_notification_service()
+        service2 = notification_service.get_notification_service()
         assert service1 is service2
-        assert isinstance(service1, NotificationService)
+        assert isinstance(service1, notification_service.NotificationService)
     
     def test_get_notification_service_initialization(self):
         """Test get_notification_service initializes correctly."""

@@ -297,18 +297,18 @@ class TestGetMongoLogger:
         from app.services import mongodb_logger
         mongodb_logger._mongo_logger = None
         
-        logger1 = get_mongo_logger()
-        logger2 = get_mongo_logger()
+        logger1 = mongodb_logger.get_mongo_logger()
+        logger2 = mongodb_logger.get_mongo_logger()
         
         assert logger1 is logger2
-        assert isinstance(logger1, MongoDBLogger)
+        assert isinstance(logger1, mongodb_logger.MongoDBLogger)
     
     def test_get_mongo_logger_initialization(self):
         """Test get_mongo_logger initializes correctly."""
         from app.services import mongodb_logger
         mongodb_logger._mongo_logger = None
         
-        logger = get_mongo_logger()
+        logger = mongodb_logger.get_mongo_logger()
         
         assert logger is not None
-        assert isinstance(logger, MongoDBLogger)
+        assert isinstance(logger, mongodb_logger.MongoDBLogger)

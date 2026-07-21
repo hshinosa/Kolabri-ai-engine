@@ -100,6 +100,7 @@ def test_analytics_export_json_zero_events_skips_case_loop(mock_get_mongo):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_stream_skips_chunks_without_text_delta(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=_stream_with_empty_choices()
@@ -119,6 +120,7 @@ def test_personal_chat_stream_skips_chunks_without_text_delta(mock_get_llm):
 @patch("app.api.routes.chat.get_llm_service")
 def test_personal_chat_stream_yields_content_delta(mock_get_llm):
     mock_llm = MagicMock()
+    mock_llm.ensure_ready = AsyncMock()
     mock_llm.model = "gpt-test"
     mock_llm.client.chat.completions.create = AsyncMock(
         return_value=_stream_with_content_delta()

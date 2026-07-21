@@ -1,6 +1,8 @@
 import pytest
 import os
 from unittest.mock import patch
+
+import pytest
 from app.core.config import Settings
 
 
@@ -20,6 +22,7 @@ def test_production_settings_require_security_secrets():
     with pytest.raises(RuntimeError) as exc_info:
         Settings(
             ENV="production",
+            UNIFIED_PROVIDER_ENABLED=False,
             OPENAI_API_KEY="",
             CORE_API_SECRET="",
             OPENAI_BASE_URL="http://insecure-openai.local",
