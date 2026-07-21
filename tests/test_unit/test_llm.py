@@ -42,6 +42,7 @@ def llm_service():
         mock_settings.OPENAI_MAX_TOKENS = 1000
         mock_settings.SCAFFOLDING_FULL_THRESHOLD = 0.3
         mock_settings.SCAFFOLDING_MINIMAL_THRESHOLD = 0.7
+        mock_settings.UNIFIED_PROVIDER_ENABLED = False
 
         # Create mock for chat completions - default success response
         mock_response = MagicMock()
@@ -99,6 +100,7 @@ def test_llm_initialization_uses_provider_context_over_env():
         mock_settings.OPENAI_MODEL = "env-model"
         mock_settings.OPENAI_TEMPERATURE = 0.7
         mock_settings.OPENAI_MAX_TOKENS = 1000
+        mock_settings.UNIFIED_PROVIDER_ENABLED = False
 
         service = OpenAILLMService(provider_context=provider_context)
 
@@ -138,12 +140,53 @@ def test_get_llm_service_returns_request_scoped_instance_for_provider_context():
         mock_settings.OPENAI_MODEL = "env-model"
         mock_settings.OPENAI_TEMPERATURE = 0.7
         mock_settings.OPENAI_MAX_TOKENS = 1000
+        mock_settings.UNIFIED_PROVIDER_ENABLED = False
 
         service = get_llm_service(provider_context=provider_context)
 
         assert isinstance(service, OpenAILLMService)
         assert service.model == "gpt-4o-mini"
 
+
+@pytest.mark.asyncio
+async def test_generate_with_unified_provider_does_not_call_asyncio_run_in_event_loop():
+    provider_context = {
+        "version": "1.0",
+        "provider": {"name": "openai", "displayName": "OpenAI GPT"},
+        "execution": {
+            "baseUrl": "https://provider.example/v1",
+            "model": "gpt-4o-mini",
+        },
+        "auth": {"type": "api-key", "credential": "sk-provider-key"},
+        "metadata": {
+            "featureFamily": "personal_chat",
+            "requestId": "req-async",
+            "resolvedAt": "2026-06-16T00:00:00.000Z",
+        },
+    }
+
+    with (
+        patch("app.services.llm.httpx.AsyncClient"),
+        patch("app.services.llm.AsyncOpenAI") as mock_openai,
+        patch.object(settings, "UNIFIED_PROVIDER_ENABLED", True),
+    ):
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Async-safe response"
+        mock_response.usage.total_tokens = 12
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_openai.return_value = mock_client
+
+        service = OpenAILLMService(provider_context=None)
+        service._fetch_provider_from_database = AsyncMock(return_value=provider_context)
+
+        result = await service.generate("hello")
+
+        assert result.success is True
+        assert result.content == "Async-safe response"
+        service._fetch_provider_from_database.assert_awaited_once()
 
 # ==============================================================================
 # TESTS: Basic Generation
@@ -715,11 +758,11 @@ async def test_generate_with_empty_choices(llm_service):
     assert result.success is True
 
 
-def test_get_llm_service_raises_without_provider_context_when_unified_enabled():
+def test_get_llm_service_returns_lazy_instance_when_unified_enabled():
     with patch("app.services.llm.settings") as mock_settings:
         mock_settings.UNIFIED_PROVIDER_ENABLED = True
-        with pytest.raises(ValueError, match="provider_context is required"):
-            get_llm_service()
+        result = get_llm_service()
+        assert isinstance(result, OpenAILLMService)
 
 
 def test_get_llm_service_returns_instance_when_unified_disabled():

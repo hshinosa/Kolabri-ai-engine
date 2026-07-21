@@ -12,7 +12,9 @@ def llm_service():
          patch("app.services.llm.AsyncOpenAI"):
         with patch.object(llm_module.settings, "OPENAI_API_KEY", "test-key"), patch.object(
             llm_module.settings, "OPENAI_BASE_URL", "http://test"
-        ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"):
+        ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"), patch.object(
+            llm_module.settings, "UNIFIED_PROVIDER_ENABLED", False
+        ):
             yield OpenAILLMService()
 
 
@@ -76,15 +78,15 @@ async def test_get_goal_refinement_suggestion(llm_service):
     response = await llm_service.get_goal_refinement_suggestion("Goal", [])
     assert response.success is True
     assert response.content == "Refinement"
-
-
-def test_singleton():
+def test_get_llm_service_returns_fresh_instances():
     llm_module._llm_service = None
     with patch("app.services.llm.httpx.AsyncClient"), \
          patch("app.services.llm.AsyncOpenAI"):
         with patch.object(llm_module.settings, "OPENAI_API_KEY", "test-key"), patch.object(
             llm_module.settings, "OPENAI_BASE_URL", "http://test"
-        ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"):
+        ), patch.object(llm_module.settings, "OPENAI_MODEL", "test-model"), patch.object(
+            llm_module.settings, "UNIFIED_PROVIDER_ENABLED", False
+        ):
             s1 = get_llm_service()
             s2 = get_llm_service()
-    assert s1 is s2
+    assert s1 is not s2

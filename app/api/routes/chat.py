@@ -439,6 +439,7 @@ async def personal_chat_stream(request: PersonalChatRequest):
 
     async def event_generator():
         try:
+            await llm.ensure_ready()
             stream = await llm.client.chat.completions.create(
                 model=llm.model,
                 messages=messages,

@@ -87,9 +87,17 @@ class OpenAILLMService:
     }
 
     def __init__(self, provider_context: Optional[Dict[str, Any]] = None):
-        if provider_context is None and settings.UNIFIED_PROVIDER_ENABLED:
-            provider_context = asyncio.run(self._fetch_provider_from_database())
+        self._provider_context = provider_context
+        self._http_client = None
+        self.client = None
+        self.model = None
+        self.temperature = None
+        self.max_tokens = None
 
+        if provider_context is not None or not settings.UNIFIED_PROVIDER_ENABLED:
+            self._configure(provider_context)
+
+    def _configure(self, provider_context: Optional[Dict[str, Any]] = None):
         auth = provider_context.get("auth", {}) if provider_context else {}
         execution = provider_context.get("execution", {}) if provider_context else {}
 
@@ -101,19 +109,22 @@ class OpenAILLMService:
 
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required")
-        self._http_client = httpx.AsyncClient(
-            limits=httpx.Limits(
-                max_connections=MAX_CONNECTIONS,
-                max_keepalive_connections=MAX_KEEPALIVE,
-            ),
-            timeout=httpx.Timeout(
-                connect=settings.LLM_TIMEOUT_CONNECT_SECONDS,
-                read=settings.LLM_TIMEOUT_READ_SECONDS,
-                write=10.0,
-                pool=5.0,
-            ),
-            http2=True,
-        )
+
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                limits=httpx.Limits(
+                    max_connections=MAX_CONNECTIONS,
+                    max_keepalive_connections=MAX_KEEPALIVE,
+                ),
+                timeout=httpx.Timeout(
+                    connect=settings.LLM_TIMEOUT_CONNECT_SECONDS,
+                    read=settings.LLM_TIMEOUT_READ_SECONDS,
+                    write=10.0,
+                    pool=5.0,
+                ),
+                http2=True,
+            )
+
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -127,6 +138,17 @@ class OpenAILLMService:
         self.max_tokens = (
             max_tokens if max_tokens is not None else settings.OPENAI_MAX_TOKENS
         )
+        self._provider_context = provider_context
+
+    async def ensure_ready(self):
+        if self.client is not None:
+            return
+
+        provider_context = self._provider_context
+        if provider_context is None and settings.UNIFIED_PROVIDER_ENABLED:
+            provider_context = await self._fetch_provider_from_database()
+
+        self._configure(provider_context)
 
     async def _fetch_provider_from_database(self) -> Optional[Dict[str, Any]]:
         try:
@@ -145,7 +167,8 @@ class OpenAILLMService:
             return None
 
     async def close(self):
-        await self._http_client.aclose()
+        if self._http_client is not None:
+            await self._http_client.aclose()
 
     async def generate(
         self,
@@ -173,6 +196,7 @@ class OpenAILLMService:
                 )
         messages.append({"role": "user", "content": prompt})
 
+        await self.ensure_ready()
         breaker = get_llm_circuit_breaker()
         start = time.time()
         try:
@@ -308,6 +332,7 @@ class OpenAILLMService:
                     }
                 )
         messages.append({"role": "user", "content": prompt})
+        await self.ensure_ready()
         try:
             stream = await self.client.chat.completions.create(
                 model=self.model,
