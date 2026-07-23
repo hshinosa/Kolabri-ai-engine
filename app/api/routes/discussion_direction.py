@@ -169,8 +169,16 @@ async def session_summary(body: SessionSummaryRequest) -> SessionSummaryResponse
         f"Tujuan: {goal}\n"
         f"Total pesan: {stats.totalMessages}, peserta: {stats.participantCount}\n\n"
         f"Transkrip:\n{transcript or '(kosong)'}\n\n"
-        "Buat ringkasan JSON dengan kunci: goalAchieved (boolean), topics (array string, max 5), "
-        "contributions (object nama->jumlah pesan), assessment (string Bahasa Indonesia, 2-4 kalimat)."
+        "Buat ringkasan JSON dengan kunci:\n"
+        "- goalAchieved (boolean): true hanya jika diskusi nyata-nyata mencapai tujuan "
+        "(ada bukti di transkrip, bukan hanya minta penjelasan AI)\n"
+        "- topics (array string, max 5): topik yang dibahas\n"
+        "- contributions (object nama->jumlah pesan)\n"
+        "- assessment (string Bahasa Indonesia, 2-4 kalimat): WAJIB jelaskan alasan.\n"
+        "  Jika goalAchieved=false, sebutkan secara konkret apa yang masih kurang "
+        "(contoh: belum membandingkan kelebihan/kekurangan, hanya tanya ke AI, "
+        "belum ada analisis mandiri antar anggota).\n"
+        "  Jika goalAchieved=true, jelaskan bukti pencapaian singkat."
     )
 
     llm = get_llm_service(
@@ -179,7 +187,8 @@ async def session_summary(body: SessionSummaryRequest) -> SessionSummaryResponse
     result = await llm.generate(
         prompt=prompt,
         system_prompt=(
-            "Kamu merangkum diskusi kelompok untuk mahasiswa. "
+            "Kamu menilai pencapaian tujuan pembelajaran diskusi kelompok. "
+            "Selalu berikan alasan konkret di field assessment. "
             "Jawab hanya JSON valid tanpa markdown."
         ),
         temperature=0.3,
