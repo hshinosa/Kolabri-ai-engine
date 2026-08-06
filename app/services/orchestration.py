@@ -21,6 +21,7 @@ from app.services.nlp_analytics import (
 )
 from app.services.intervention import get_intervention_service
 from app.services.mongodb_logger import get_mongo_logger
+from app.services.srl_classifier import get_srl_classifier, SRLPhase
 from app.services.goal_validator import get_goal_validator
 from app.services.logic_listener import get_logic_listener
 from app.services.plan_vs_reality import get_plan_vs_reality_analyzer
@@ -359,6 +360,22 @@ class Orchestrator:
             srl_obj = self.analyzer.extract_srl_object(
                 message, default=topic or "General"
             )
+
+            # Classify Zimmerman SRL phase
+            try:
+                classifier = get_srl_classifier()
+                srl_classification = classifier.classify(message)
+                srl_phase = srl_classification.phase.value
+                srl_sub_phase = srl_classification.sub_phase
+                srl_confidence = srl_classification.confidence
+                srl_indicators = srl_classification.indicators
+            except Exception as e:
+                logger.warning(f"SRL classification failed: {e}")
+                srl_phase = None
+                srl_sub_phase = None
+                srl_confidence = 0.0
+                srl_indicators = []
+
             scaffolding_outcome = (
                 "applied" if scaffolding_config.get("enabled", True) else "disabled"
             )
@@ -376,6 +393,9 @@ class Orchestrator:
                     "is_hot": analytics.is_higher_order,
                     "lexical_variety": analytics.lexical_variety,
                     "scaffolding_trigger": False,
+                    "srl_phase": srl_phase,
+                    "srl_sub_phase": srl_sub_phase,
+                    "srl_confidence": srl_confidence,
                 },
             }
 
@@ -396,6 +416,9 @@ class Orchestrator:
                     "grounding_ratio": grounding_ratio,
                     "scaffolding_level": effective_level,
                     "scaffolding_outcome": scaffolding_outcome,
+                    "srl_phase": srl_phase,
+                    "srl_sub_phase": srl_sub_phase,
+                    "srl_confidence": srl_confidence,
                 },
             }
 
