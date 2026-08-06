@@ -21,7 +21,11 @@ from app.services.nlp_analytics import (
 )
 from app.services.intervention import get_intervention_service
 from app.services.mongodb_logger import get_mongo_logger
-from app.services.srl_classifier import get_srl_classifier, SRLPhase
+from app.services.srl_classifier_enhanced import (
+    get_enhanced_srl_classifier,
+    EnhancedSRLClassificationResult,
+    SRLPhase,
+)
 from app.services.goal_validator import get_goal_validator
 from app.services.logic_listener import get_logic_listener
 from app.services.plan_vs_reality import get_plan_vs_reality_analyzer
@@ -363,7 +367,7 @@ class Orchestrator:
 
             # Classify Zimmerman SRL phase
             try:
-                classifier = get_srl_classifier()
+                srl_classifier = get_enhanced_srl_classifier()
                 srl_classification = classifier.classify(message)
                 srl_phase = srl_classification.phase.value
                 srl_sub_phase = srl_classification.sub_phase
