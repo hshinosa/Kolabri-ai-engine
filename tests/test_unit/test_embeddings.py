@@ -103,7 +103,10 @@ class TestGetEmbeddingService:
         service2 = get_embedding_service()
 
         assert service1 is service2
-        assert isinstance(service1, LocalEmbeddingService)
+        if embeddings.settings.EMBEDDING_PROVIDER == "local":
+            assert isinstance(service1, LocalEmbeddingService)
+        else:
+            assert isinstance(service1, embeddings.VoyageEmbeddingService)
 
     def test_get_embedding_service_returns_existing_instance(self):
         existing = LocalEmbeddingService()

@@ -107,7 +107,10 @@ class TestGetEmbeddingServiceFull:
         service = get_embedding_service()
 
         assert service is not None
-        assert isinstance(service, LocalEmbeddingService)
+        if embeddings.settings.EMBEDDING_PROVIDER == "local":
+            assert isinstance(service, LocalEmbeddingService)
+        else:
+            assert isinstance(service, embeddings.VoyageEmbeddingService)
 
     def test_singleton_returns_existing(self):
         existing = MagicMock()

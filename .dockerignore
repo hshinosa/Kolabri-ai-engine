@@ -3,10 +3,15 @@ __pycache__/
 *.pyo
 *.pyd
 .env
+.env.*
+.venv/
 venv/
 .git
 .gitignore
 data/
 Materi Destink/
 test_*.py
+tests/
+htmlcov/
+.pytest_cache/
 docs

@@ -127,28 +127,72 @@ class EnhancedSRLClassifier:
         ],
     }
 
-    PHASE_WEIGHTS = {
-        SRLPhase.FORETHOUGHT: 1.2,
-        SRLPhase.PERFORMANCE: 1.0,
-        SRLPhase.REFLECTION: 1.3,  # Highest weight for reflection (critical for learning)
-    }
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize with optional configuration for phase weights and sensitivity."""
+        
+        # Start with Zimmerman's standard defaults
+        defaults = {
+            "phase_weights": {
+                SRLPhase.FORETHOUGHT: 1.2,
+                SRLPhase.PERFORMANCE: 1.0,
+                SRLPhase.REFLECTION: 1.3,
+            },
+            "scaffolding_levels": {
+                SRLPhase.FORETHOUGHT: "high",
+                SRLPhase.PERFORMANCE: "medium",
+                SRLPhase.REFLECTION: "low",
+            },
+            "intervention_hints": {
+                SRLPhase.FORETHOUGHT: "Goal clarification & planning support",
+                SRLPhase.PERFORMANCE: "Strategy validation & monitoring check-in",
+                SRLPhase.REFLECTION: "Metacognitive reflection prompt",
+            },
+            "confidence_min": 0.3,
+            "confidence_max": 0.95,
+            "enable_pattern_tracking": True,
+            "max_matched_patterns": 10,
+            "weight_multiplier": 1.5,
+        }
+        
+        # Deep copy defaults into config
+        self.config = {}
+        for key, value in defaults.items():
+            if isinstance(value, dict):
+                self.config[key] = value.copy()
+            else:
+                self.config[key] = value
+        
+        # Apply custom config if provided
+        if config:
+            self._apply_config(config)
 
-    # Scaffolding levels per phase
-    SCAFFOLDING_LEVELS = {
-        SRLPhase.FORETHOUGHT: "high",  # Need strong goal-setting support
-        SRLPhase.PERFORMANCE: "medium",  # Moderate guidance needed
-        SRLPhase.REFLECTION: "low",  # Mostly self-directed
-    }
+    def _apply_config(self, config: Dict[str, Any]):
+        """Apply configuration updates dynamically."""
+        
+        if "phase_weights" in config:
+            self.config["phase_weights"].update(config["phase_weights"])
+        
+        if "scaffolding_levels" in config:
+            self.config["scaffolding_levels"].update(config["scaffolding_levels"])
+        
+        if "intervention_hints" in config:
+            self.config["intervention_hints"].update(config["intervention_hints"])
+        
+        if "confidence_min" in config:
+            self.config["confidence_min"] = config["confidence_min"]
+        
+        if "confidence_max" in config:
+            self.config["confidence_max"] = config["confidence_max"]
+        
+        if "enable_pattern_tracking" in config:
+            self.config["enable_pattern_tracking"] = config["enable_pattern_tracking"]
+        
+        if "max_matched_patterns" in config:
+            self.config["max_matched_patterns"] = config["max_matched_patterns"]
+        
+        if "weight_multiplier" in config:
+            self.config["weight_multiplier"] = config["weight_multiplier"]
 
-    # Intervention hints per phase
-    INTERVENTION_HINTS = {
-        SRLPhase.FORETHOUGHT: "Goal clarification & planning support",
-        SRLPhase.PERFORMANCE: "Strategy validation & monitoring check-in",
-        SRLPhase.REFLECTION: "Metacognitive reflection prompt",
-    }
-
-    def __init__(self):
-        pass
 
     def classify(self, message: str) -> EnhancedSRLClassificationResult:
         """Classify message into Zimmerman phase with enhanced features."""
@@ -179,11 +223,11 @@ class EnhancedSRLClassifier:
         # Apply weights and calculate totals
         phase_totals = {
             SRLPhase.FORETHOUGHT: forethought_score
-            * self.PHASE_WEIGHTS[SRLPhase.FORETHOUGHT],
+            * self.config["phase_weights"][SRLPhase.FORETHOUGHT],
             SRLPhase.PERFORMANCE: performance_score
-            * self.PHASE_WEIGHTS[SRLPhase.PERFORMANCE],
+            * self.config["phase_weights"][SRLPhase.PERFORMANCE],
             SRLPhase.REFLECTION: reflection_score
-            * self.PHASE_WEIGHTS[SRLPhase.REFLECTION],
+            * self.config["phase_weights"][SRLPhase.REFLECTION],
         }
 
         max_score = max(phase_totals.values())
@@ -212,8 +256,8 @@ class EnhancedSRLClassifier:
         calibrated_confidence = max(0.3, min(0.95, raw_confidence))
 
         # Determine scaffolding level and intervention hint
-        scaffolding_level = self.SCAFFOLDING_LEVELS[winning_phase]
-        intervention_hint = self.INTERVENTION_HINTS[winning_phase]
+        scaffolding_level = self.config["scaffolding_levels"][winning_phase]
+        intervention_hint = self.config["intervention_hints"][winning_phase]
 
         # Requires attention flag (true for reflection = metacognitive awareness)
         requires_attention = winning_phase == SRLPhase.REFLECTION
@@ -226,7 +270,7 @@ class EnhancedSRLClassifier:
             scaffolding_level=scaffolding_level,
             intervention_hint=intervention_hint,
             requires_attention=requires_attention,
-            matched_patterns=matched_patterns[:10],  # Limit to top 10 matches
+            matched_patterns=matched_patterns[:self.config["max_matched_patterns"]],  # Limit to top 10 matches
             pattern_scores={
                 SRLPhase.FORETHOUGHT.value: forethought_score,
                 SRLPhase.PERFORMANCE.value: performance_score,
@@ -250,7 +294,7 @@ class EnhancedSRLClassifier:
                 try:
                     if re.search(pattern, message):
                         count += 1
-                        indicator = f"{list(patterns.keys())[0]}:{sub_phase}"
+                        indicator = f"forethought:{sub_phase}" if "goal_setting" in sub_phase or "planning" in sub_phase else (f"performance:{sub_phase}" if "strategy_execution" in sub_phase or "monitoring_control" in sub_phase else f"reflection:{sub_phase}")
                         if indicator not in indicators:
                             indicators.append(indicator)
 
@@ -260,7 +304,7 @@ class EnhancedSRLClassifier:
                     logger.warning(f"Invalid regex pattern: {pattern}, error: {e}")
 
             if count > 0:
-                total_score += count * 1.5  # Weight multiple matches
+                total_score += count * self.config["weight_multiplier"]  # Weight multiple matches
 
         return total_score
 
@@ -286,7 +330,7 @@ class EnhancedSRLClassifier:
         """Generate actionable recommendations based on classification."""
 
         recommendations = {
-            "scaffolding_action": self._get_scaffolding_action(result.phase),
+            "scaffolding_action": self._get_scaffolding_action(result.phase, result.confidence),
             "intervention_type": self._suggest_intervention(result.phase),
             "follow_up_needed": result.requires_attention,
             "priority_level": self._calculate_priority(result.confidence, result.phase),
@@ -294,14 +338,37 @@ class EnhancedSRLClassifier:
 
         return recommendations
 
-    def _get_scaffolding_action(self, phase: SRLPhase) -> str:
-        """Get recommended scaffolding action per phase."""
-        actions = {
+    def _get_scaffolding_action(self, phase: SRLPhase, confidence: float = 0.5) -> str:
+        """Get recommended scaffolding action per phase with dynamic adjustment."""
+        
+        base_actions = {
             SRLPhase.FORETHOUGHT: "Guide goal-setting, provide planning templates",
             SRLPhase.PERFORMANCE: "Monitor progress, validate strategies, offer examples",
             SRLPhase.REFLECTION: "Prompt metacognitive questions, encourage self-assessment",
         }
-        return actions.get(phase, "Provide standard support")
+        
+        base_action = base_actions.get(phase, "Provide standard support")
+        
+        # Dynamic adjustment based on confidence
+        if confidence < 0.4:
+            # Low confidence - increase scaffolding intensity
+            intensified_actions = {
+                SRLPhase.FORETHOUGHT: "INTENSIVE: Provide explicit goal-setting framework + visual planning aid",
+                SRLPhase.PERFORMANCE: "INTENSIVE: Step-by-step strategy walkthrough + real-time monitoring",
+                SRLPhase.REFLECTION: "INTENSIVE: Guided reflection template + structured self-assessment rubric",
+            }
+            return intensified_actions.get(phase, "Provide intensive support")
+        elif confidence > 0.8:
+            # High confidence - reduce scaffolding
+            reduced_actions = {
+                SRLPhase.FORETHOUGHT: "Light guidance only - trust student goal clarity",
+                SRLPhase.PERFORMANCE: "Minimal intervention - allow autonomous strategy execution",
+                SRLPhase.REFLECTION: "Student-led reflection - facilitator just listens",
+            }
+            return reduced_actions.get(phase, "Offer minimal support")
+        else:
+            # Medium confidence - use default scaffolding
+            return base_action
 
     def _suggest_intervention(self, phase: SRLPhase) -> str:
         """Suggest intervention type based on phase."""

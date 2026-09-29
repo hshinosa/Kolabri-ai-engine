@@ -61,6 +61,8 @@ ANTHROPIC_MODELS = [
 async def fetch_models(
     provider: str,
     force_refresh: bool = False,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Fetch available models from provider API.
@@ -68,35 +70,39 @@ async def fetch_models(
     Returns cached models (1-hour TTL) unless force_refresh=True.
 
     Args:
-        provider: Provider name (openai, anthropic, gemini)
+        provider: Provider name (openai, anthropic, gemini) or any custom
+            OpenAI-compatible provider name (requires base_url)
         force_refresh: Bypass cache and fetch fresh data
+        base_url: Explicit endpoint for OpenAI-compatible model listing
+        api_key: Explicit API key for the listing request
 
     Returns:
         dict with keys: success, models, cached, error?
 
     Raises:
-        ValueError: If provider is not supported
+        ValueError: If provider is not supported and no base_url given
     """
     provider = provider.lower()
+    cache_key = f"{provider}|{base_url}" if base_url else provider
 
-    if provider not in SUPPORTED_PROVIDERS:
+    if provider not in SUPPORTED_PROVIDERS and not base_url:
         raise ValueError(
             f"Unsupported provider '{provider}'. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
         )
 
     # Check cache first (unless force refresh)
-    if not force_refresh and provider in _model_cache:
-        logger.info(f"Returning cached models for {provider}")
+    if not force_refresh and cache_key in _model_cache:
+        logger.info(f"Returning cached models for {cache_key}")
         return {
             "success": True,
-            "models": _model_cache[provider],
+            "models": _model_cache[cache_key],
             "cached": True,
         }
 
     # Fetch fresh models
     try:
-        if provider == "openai":
-            models = await _fetch_openai_models()
+        if provider in ("openai",) or base_url:
+            models = await _fetch_openai_models(base_url=base_url, api_key=api_key)
         elif provider == "anthropic":
             models = _fetch_anthropic_models()
         elif provider == "gemini":
@@ -105,7 +111,7 @@ async def fetch_models(
             models = []
 
         # Cache the result
-        _model_cache[provider] = models
+        _model_cache[cache_key] = models
 
         logger.info(f"Fetched {len(models)} models for {provider}")
 
@@ -118,11 +124,11 @@ async def fetch_models(
         logger.error(f"Model discovery failed for {provider}: {e}", exc_info=True)
 
         # Return cached data if available, even if expired
-        if provider in _model_cache:
-            logger.warning(f"Returning stale cache for {provider} due to error")
+        if cache_key in _model_cache:
+            logger.warning(f"Returning stale cache for {cache_key} due to error")
             return {
                 "success": True,
-                "models": _model_cache[provider],
+                "models": _model_cache[cache_key],
                 "cached": True,
             }
 
@@ -134,53 +140,53 @@ async def fetch_models(
         }
 
 
-async def _fetch_openai_models() -> list[dict[str, Any]]:
+async def _fetch_openai_models(
+    base_url: str | None = None, api_key: str | None = None
+) -> list[dict[str, Any]]:
     """
-    Fetch models from OpenAI API.
+    Fetch models from an OpenAI-compatible API (`GET /models`).
 
-    Uses OpenAI's list models endpoint.
-    Note: Requires valid API key from environment or config.
+    With explicit base_url/api_key this serves custom OpenAI-compatible
+    providers (proxies, routers). Without them it falls back to the legacy
+    OpenAI env-based discovery.
     """
-    # For model discovery, we can use a generic client
-    # Admin will provide their own key for testing, but for discovery
-    # we might need a system-level key or accept errors
-
     try:
-        # Try to use env var or return common models as fallback
         import os
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        key = api_key or os.getenv("OPENAI_API_KEY")
 
-        if not api_key:
+        if not key:
             logger.warning(
-                "No OPENAI_API_KEY for model discovery, returning common models"
+                "No API key for model discovery, returning common models"
             )
             return _get_openai_common_models()
 
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=key, base_url=base_url) if base_url else AsyncOpenAI(api_key=key)
         response = await client.models.list()
 
-        # Filter to only chat models (gpt-*)
+        # Legacy OpenAI path filters to chat models (gpt-*); custom
+        # OpenAI-compatible endpoints return arbitrary model ids, so list all.
         models = []
         for model in response.data:
-            if model.id.startswith("gpt-"):
-                models.append(
-                    {
-                        "id": model.id,
-                        "name": model.id.upper().replace("-", " "),
-                        "description": None,
-                        "contextWindow": _get_openai_context_window(model.id),
-                        "inputCost": None,  # OpenAI doesn't expose pricing via API
-                        "outputCost": None,
-                    }
-                )
+            if not base_url and not model.id.startswith("gpt-"):
+                continue
+            models.append(
+                {
+                    "id": model.id,
+                    "name": model.id.upper().replace("-", " "),
+                    "description": None,
+                    "contextWindow": _get_openai_context_window(model.id),
+                    "inputCost": None,
+                    "outputCost": None,
+                }
+            )
 
         # Sort by ID (newest first)
         models.sort(key=lambda m: m["id"], reverse=True)
 
         return models
     except Exception as e:
-        logger.warning(f"OpenAI model API failed: {e}, returning common models")
+        logger.warning(f"Model listing API failed: {e}, returning common models")
         return _get_openai_common_models()
 
 

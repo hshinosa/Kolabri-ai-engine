@@ -119,3 +119,113 @@ async def get_provider_models(
             cached=False,
             error=f"Unable to fetch models from provider. Please manually enter model ID. Error: {str(e)}",
         )
+
+
+class ModelDiscoveryRequest(BaseModel):
+    """Model discovery with explicit OpenAI-compatible credentials."""
+
+    provider: str = Field(..., description="Provider name")
+    refresh: bool = Field(False, description="Force cache refresh")
+    baseUrl: str | None = Field(None, description="OpenAI-compatible base URL")
+    apiKey: str | None = Field(None, description="API key for the listing request")
+
+
+@router.post("/providers/{provider}/models", response_model=ModelListResponse)
+async def post_provider_models(
+    provider: str, request: ModelDiscoveryRequest
+) -> ModelListResponse:
+    """
+    Fetch available models using explicit credentials (kept in the POST body
+    so keys never appear in request URLs or logs).
+    """
+    try:
+        result = await fetch_models(
+            provider=provider,
+            force_refresh=request.refresh,
+            base_url=request.baseUrl,
+            api_key=request.apiKey,
+        )
+        return ModelListResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Model discovery error for {provider}: {e}", exc_info=True)
+        return ModelListResponse(
+            success=False,
+            models=[],
+            cached=False,
+            error=f"Unable to fetch models from provider. Please manually enter model ID. Error: {str(e)}",
+        )
+
+
+# ============================================
+# Embedding Configuration
+# ============================================
+
+
+class EmbeddingConfigResponse(BaseModel):
+    """Current embedding configuration."""
+
+    provider: str
+    voyageModel: str | None = None
+    voyageOutputDimension: int | None = None
+    voyageConfigured: bool
+    localModel: str | None = None
+    activeProvider: str
+    degraded: bool = False
+
+
+class EmbeddingConfigUpdate(BaseModel):
+    """Switch embedding provider at runtime."""
+
+    provider: str = Field(..., description="Target provider: 'voyage' or 'local'")
+
+
+@router.get("/embedding-config", response_model=EmbeddingConfigResponse)
+async def get_embedding_config() -> EmbeddingConfigResponse:
+    """Report the active embedding provider and its configuration."""
+    from app.core.config import settings
+    from app.services.embeddings import get_embedding_service
+
+    svc = get_embedding_service()
+    provider_name = "local" if getattr(svc, "degraded", False) else settings.EMBEDDING_PROVIDER
+    return EmbeddingConfigResponse(
+        provider=provider_name,
+        voyageModel=settings.VOYAGE_MODEL if not getattr(svc, "degraded", False) else None,
+        voyageOutputDimension=settings.VOYAGE_OUTPUT_DIMENSION if not getattr(svc, "degraded", False) else None,
+        voyageConfigured=bool(settings.VOYAGE_API_KEY),
+        localModel=settings.EMBEDDING_MODEL,
+        activeProvider=type(svc).__name__,
+        degraded=bool(getattr(svc, "degraded", False)),
+    )
+
+
+@router.put("/embedding-config")
+async def update_embedding_config(request: EmbeddingConfigUpdate) -> dict:
+    """Switch embedding provider at runtime (voyage <-> local)."""
+    from app.core.config import settings
+    from app.services import embeddings as embeddings_module
+
+    provider = request.provider.strip().lower()
+    if provider not in ("voyage", "local"):
+        raise HTTPException(status_code=422, detail="provider must be 'voyage' or 'local'")
+    if provider == "voyage" and not settings.VOYAGE_API_KEY:
+        raise HTTPException(status_code=409, detail="VOYAGE_API_KEY is not configured")
+
+    embeddings_module._embedding_service = None
+    settings.EMBEDDING_PROVIDER = provider
+    svc = embeddings_module.get_embedding_service()
+    logger.info(
+        "embedding_provider_switched",
+        provider=provider,
+        service=type(svc).__name__,
+    )
+    return {
+        "data": {
+            "provider": provider,
+            "activeService": type(svc).__name__,
+            # Avoid touching svc.dimension: for the local provider that would
+            # eagerly download/load the ONNX model and stall the request.
+            "dimension": settings.VOYAGE_OUTPUT_DIMENSION if provider == "voyage" else None,
+        }
+    }

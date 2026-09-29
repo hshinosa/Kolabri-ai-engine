@@ -53,8 +53,22 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION_PREFIX: str = "kolabri"
 
-    # Embedding (Local FastEmbed)
+    # Embedding Provider
+    # "voyage" = remote Voyage AI API (primary); "local" = FastEmbed on-device (backup).
+    # Auto-falls back to local when VOYAGE_API_KEY is missing or the API is unreachable.
+    EMBEDDING_PROVIDER: str = "voyage"
+    # Local FastEmbed (backup path)
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+    # Voyage AI (primary embedding provider)
+    VOYAGE_API_KEY: str = ""
+    VOYAGE_BASE_URL: str = "https://api.voyageai.com/v1"
+    VOYAGE_MODEL: str = "voyage-3.5"
+    VOYAGE_OUTPUT_DIMENSION: int = 1024
+    VOYAGE_BATCH_SIZE: int = 128
+    VOYAGE_MAX_ATTEMPTS: int = 3
+    VOYAGE_RETRY_BACKOFF: float = 1.0
+    VOYAGE_TIMEOUT: float = 60.0
 
     # Document Processing
     MAX_FILE_SIZE_MB: int = 10

@@ -368,7 +368,7 @@ class Orchestrator:
             # Classify Zimmerman SRL phase
             try:
                 srl_classifier = get_enhanced_srl_classifier()
-                srl_classification = classifier.classify(message)
+                srl_classification = srl_classifier.classify(message)
                 srl_phase = srl_classification.phase.value
                 srl_sub_phase = srl_classification.sub_phase
                 srl_confidence = srl_classification.confidence
