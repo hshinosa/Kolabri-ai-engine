@@ -142,16 +142,24 @@ def test_validate_goal_form_invalid_provider_context_falls_back_to_none(
 
 
 @patch("app.api.routes.chat.get_llm_service")
-def test_personal_chat_awaits_ensure_ready_before_using_client(mock_get_llm):
+def test_personal_chat_stream_awaits_ensure_ready_before_using_client(mock_get_llm):
     """Mirrors the lazy unified-mode service: client/model only exist after
-    ensure_ready(). Pre-fix, personal_chat used llm.client directly and
-    AttributeError made every request return success=False."""
+    ensure_ready(). The (now stream-only) personal chat path must await it
+    before touching llm.client — pre-fix the non-stream handler used
+    llm.client directly and AttributeError made every request fail."""
     service = SimpleNamespace(client=None, model=None)
-    completion_create = AsyncMock(return_value=_completion_response("Halo juga"))
+
+    async def _stream(chunks):
+        for content in chunks:
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+            )
+
+    stream_create = AsyncMock(return_value=_stream(["Halo juga"]))
 
     async def _configure():
         service.client = SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=completion_create))
+            chat=SimpleNamespace(completions=SimpleNamespace(create=stream_create))
         )
         service.model = "gpt-test"
 
@@ -159,13 +167,14 @@ def test_personal_chat_awaits_ensure_ready_before_using_client(mock_get_llm):
     mock_get_llm.return_value = service
 
     response = client.post(
-        "/chat/personal", json={"message": "Halo", "history": []}
+        "/chat/personal/stream",
+        json={"message": "halo-ensure-ready-probe", "history": []},
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert data["reply"] == "Halo juga"
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert 'data: {"content": "Halo juga"}' in response.text
+    assert "data: [DONE]" in response.text
     service.ensure_ready.assert_awaited_once()
-    completion_create.assert_awaited_once()
-    assert completion_create.call_args.kwargs["model"] == "gpt-test"
+    stream_create.assert_awaited_once()
+    assert stream_create.call_args.kwargs["model"] == "gpt-test"

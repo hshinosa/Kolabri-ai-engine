@@ -1,7 +1,12 @@
+import asyncio
+import hashlib
+import json
 import time
+import weakref
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
+from cachetools import TTLCache
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -39,6 +44,41 @@ logger = get_logger(__name__)
 
 MAX_CONNECTIONS = 50
 MAX_KEEPALIVE = 20
+
+# M2/M4: provider-response cache at the single generate() boundary.
+# Responses and single-flight locks are scoped to the running event loop:
+# asyncio.Lock is loop-bound, and production serves requests from a single
+# loop, so the cache is effectively process-wide while staying safe under
+# per-loop test runners. Gated by settings.ENABLE_EFFICIENCY_GUARD.
+PROVIDER_CACHE_TTL_SECONDS = 600
+PROVIDER_CACHE_MAX_ENTRIES = 1000
+
+# Sentinel: distinguishes "usage object lacks the attribute" from "attribute is None".
+_USAGE_MISSING = object()
+
+
+class _ProviderCallCache:
+    """Per-event-loop response cache + single-flight locks for generate()."""
+
+    def __init__(self) -> None:
+        self.responses: TTLCache = TTLCache(
+            maxsize=PROVIDER_CACHE_MAX_ENTRIES, ttl=PROVIDER_CACHE_TTL_SECONDS
+        )
+        self.inflight: Dict[str, asyncio.Lock] = {}
+
+
+_provider_call_caches: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _ProviderCallCache]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _get_provider_call_cache() -> _ProviderCallCache:
+    loop = asyncio.get_running_loop()
+    cache = _provider_call_caches.get(loop)
+    if cache is None:
+        cache = _ProviderCallCache()
+        _provider_call_caches[loop] = cache
+    return cache
 
 
 class LLMDegradedError(Exception):
@@ -171,6 +211,46 @@ class OpenAILLMService:
         if self._http_client is not None:
             await self._http_client.aclose()
 
+    def _provider_cache_key(
+        self, messages: List[Dict[str, str]], temperature, max_tokens
+    ) -> str:
+        """SHA-256 over every input that determines the provider response.
+
+        Covers the spec key components (prompt + system prompt incl. injected
+        context + model + temperature + max_tokens) via the serialized messages,
+        plus chat_history and base_url so two requests can only share a cached
+        response when they would have produced the same provider call.
+        """
+        material = {
+            "messages": messages,
+            "model": self.model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "base_url": str(self.client.base_url),
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                material, sort_keys=True, ensure_ascii=False, default=str
+            ).encode("utf-8")
+        )
+        return digest.hexdigest()
+
+    def _log_prompt_cache_usage(self, usage) -> bool:
+        """M0: report provider prefix-cache token usage when the provider sends it."""
+        if usage is None:
+            return False
+        hit = getattr(usage, "prompt_cache_hit_tokens", _USAGE_MISSING)
+        miss = getattr(usage, "prompt_cache_miss_tokens", _USAGE_MISSING)
+        if hit is _USAGE_MISSING and miss is _USAGE_MISSING:
+            return False
+        logger.info(
+            "llm_prompt_cache_usage",
+            hit=None if hit is _USAGE_MISSING else hit,
+            miss=None if miss is _USAGE_MISSING else miss,
+            model=self.model,
+        )
+        return True
+
     async def generate(
         self,
         prompt: str,
@@ -198,14 +278,68 @@ class OpenAILLMService:
         messages.append({"role": "user", "content": prompt})
 
         await self.ensure_ready()
+        effective_temperature = (
+            self.temperature if temperature is None else temperature
+        )
+        effective_max_tokens = self.max_tokens if max_tokens is None else max_tokens
+
+        # M2/M4: efficiency guard off -> no provider-response caching at all.
+        if not settings.ENABLE_EFFICIENCY_GUARD:
+            return await self._execute_via_provider(
+                messages, effective_temperature, effective_max_tokens
+            )
+
+        key = self._provider_cache_key(
+            messages, effective_temperature, effective_max_tokens
+        )
+        call_cache = _get_provider_call_cache()
+
+        cached = call_cache.responses.get(key)
+        if cached is not None:
+            logger.info("llm_provider_cache", result="hit", model=self.model)
+            return cached
+
+        lock = call_cache.inflight.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            call_cache.inflight[key] = lock
+        async with lock:
+            try:
+                # Single-flight re-check: an identical concurrent request may
+                # have populated the cache while we waited for the lock.
+                cached = call_cache.responses.get(key)
+                if cached is not None:
+                    logger.info("llm_provider_cache", result="hit", model=self.model)
+                    return cached
+                result = await self._execute_via_provider(
+                    messages, effective_temperature, effective_max_tokens
+                )
+                # Only successful responses are cached; failures and exceptions
+                # never enter the cache.
+                if result.success:
+                    call_cache.responses[key] = result
+                logger.info(
+                    "llm_provider_cache",
+                    result="miss",
+                    success=result.success,
+                    model=self.model,
+                )
+                return result
+            finally:
+                # Drop only our own lock so a successor's lock is never removed.
+                if call_cache.inflight.get(key) is lock:
+                    del call_cache.inflight[key]
+
+    async def _execute_via_provider(self, messages, temperature, max_tokens):
+        """Provider call behind circuit breaker + retry (M2/M4 cache boundary)."""
         breaker = get_llm_circuit_breaker()
         start = time.time()
         try:
             result = await breaker.call(
                 self._execute_with_retry,
                 messages,
-                self.temperature if temperature is None else temperature,
-                self.max_tokens if max_tokens is None else max_tokens,
+                temperature,
+                max_tokens,
             )
             result.response_time_ms = (time.time() - start) * 1000
             return result
@@ -285,6 +419,7 @@ class OpenAILLMService:
                 tokens_used=tokens,
                 finish_reason=resp.choices[0].finish_reason if resp.choices else None,
             )
+            self._log_prompt_cache_usage(resp.usage)
             return LLMResponse(
                 content=content, tokens_used=tokens, model=self.model, success=True
             )
@@ -344,7 +479,13 @@ class OpenAILLMService:
                 max_tokens=self.max_tokens if max_tokens is None else max_tokens,
                 stream=True,
             )
+            usage_reported = False
             async for chunk in stream:
+                if not usage_reported:
+                    # M0: providers put prefix-cache usage on the final chunk.
+                    usage_reported = self._log_prompt_cache_usage(
+                        getattr(chunk, "usage", None)
+                    )
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
                     yield delta.content

@@ -220,6 +220,7 @@ async def test_llm_close():
 async def test_rag_scaffolding_auto_level_no_early_late_style():
     import app.services.rag as rag_module
     from app.core.guardrails import GuardrailAction, GuardrailResult
+    from app.core.prompt_styles import SCAFFOLDING_EARLY_STYLE, SCAFFOLDING_LATE_STYLE
 
     vs = MagicMock()
     vs.search = AsyncMock(
@@ -228,7 +229,7 @@ async def test_rag_scaffolding_auto_level_no_early_late_style():
         ]
     )
     llm = MagicMock()
-    llm.generate_rag_response = AsyncMock(
+    llm.generate = AsyncMock(
         return_value=SimpleNamespace(
             content="a", tokens_used=1, success=True, error=None
         )
@@ -268,9 +269,13 @@ async def test_rag_scaffolding_auto_level_no_early_late_style():
                     }
                 },
             )
-    ctx = llm.generate_rag_response.await_args.kwargs.get("context")
-    assert ctx is not None
-    assert "auto" in ctx
+    kwargs = llm.generate.await_args.kwargs
+    prompt = kwargs["prompt"]
+    # scaffolding rides the user prompt; auto level applies no early/late style preset
+    assert "Scaffolding level for this cohort: auto" in prompt
+    assert SCAFFOLDING_EARLY_STYLE not in prompt
+    assert SCAFFOLDING_LATE_STYLE not in prompt
+    assert "Scaffolding level for this cohort" not in kwargs["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -283,7 +288,7 @@ async def test_rag_scaffolding_disabled_skips_block():
         return_value=[{"content": "c", "metadata": {"source": "s"}, "score": 0.9}]
     )
     llm = MagicMock()
-    llm.generate_rag_response = AsyncMock(
+    llm.generate = AsyncMock(
         return_value=SimpleNamespace(
             content="a", tokens_used=1, success=True, error=None
         )
@@ -318,7 +323,8 @@ async def test_rag_scaffolding_disabled_skips_block():
                 "Jelaskan machine learning dan deep learning",
                 guardrail_context={"scaffolding_config": {"enabled": False}},
             )
-    assert llm.generate_rag_response.await_args.kwargs.get("context") is None
+    prompt = llm.generate.await_args.kwargs["prompt"]
+    assert "Scaffolding level for this cohort" not in prompt
 
 
 @pytest.mark.asyncio

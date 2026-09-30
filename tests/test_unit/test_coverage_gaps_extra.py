@@ -362,7 +362,11 @@ class TestRagCoverageGapsExtra:
         guardrails = rag_pipeline_components["guardrails"]
 
         pipeline._last_contexts = [{"content": "cached context", "metadata": {"source": "cache"}, "score": 0.9}]
-        llm_service.generate_rag_response.return_value = SimpleNamespace(
+        # New contract: the cached contexts reach generation inside the leading user prompt.
+        llm_service._format_contexts.side_effect = lambda contexts: "\n\n".join(
+            c["content"] for c in contexts
+        )
+        llm_service.generate.return_value = SimpleNamespace(
             content="Cached answer",
             tokens_used=17,
             success=True,
@@ -381,7 +385,8 @@ class TestRagCoverageGapsExtra:
         assert result.success is True
         assert result.sources == []
         vector_store.search.assert_not_awaited()
-        llm_service.generate_rag_response.assert_awaited_once()
+        llm_service.generate.assert_awaited_once()
+        assert "cached context" in llm_service.generate.await_args.kwargs["prompt"]
         guardrails.check_output.assert_called_once()
 
     @pytest.mark.asyncio
@@ -397,7 +402,7 @@ class TestRagCoverageGapsExtra:
                 "score": 0.88,
             }
         ]
-        llm_service.generate_rag_response.return_value = SimpleNamespace(
+        llm_service.generate.return_value = SimpleNamespace(
             content="Jawaban spekulatif",
             tokens_used=29,
             success=True,

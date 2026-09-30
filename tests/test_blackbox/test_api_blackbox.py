@@ -213,12 +213,13 @@ class TestRequestValidation:
 
         _assert_json_error_structure(response, 422)
 
-    def test_personal_chat_rejects_empty_body(
+    def test_personal_chat_non_stream_route_is_removed(
         self, client: TestClient, auth_headers: dict[str, str]
     ):
+        # Inference is stream-only now: POST /api/chat/personal no longer exists.
         response = client.post("/api/chat/personal", headers=auth_headers)
 
-        _assert_json_error_structure(response, 422)
+        _assert_json_error_structure(response, 404)
 
     def test_ingest_rejects_missing_file_and_form_fields(
         self, client: TestClient, auth_headers: dict[str, str]

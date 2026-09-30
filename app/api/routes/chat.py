@@ -3,10 +3,13 @@ RAG ask & personal chat endpoints.
 """
 
 import asyncio
+import hashlib
 import json as _json
 import re
+import weakref
 from typing import Any, cast
 
+from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from openai.types.chat import ChatCompletionMessageParam
@@ -15,7 +18,6 @@ from app.api.schemas import (
     AskRequest,
     AskResponse,
     PersonalChatRequest,
-    PersonalChatResponse,
     ReadingRecommendationFallback,
     ReadingRecommendationItem,
     ReadingRecommendationRequest,
@@ -43,11 +45,58 @@ PERSONAL_CHAT_SYSTEM_PROMPT = (
     + PERSONAL_CHAT_STYLE
 )
 
+PERSONAL_CHAT_TEMPERATURE = 0.7
+PERSONAL_CHAT_MAX_TOKENS = 8192
+
 COURSE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 MIN_RELEVANCE_SCORE = 0.15
 # Upper bound on course collections scanned per personal-chat request.
 # Matches PersonalChatRequest.course_ids max_length in app/api/schemas.py.
 MAX_PERSONAL_RAG_COURSES = 20
+
+# Chunk-replay cache + single-flight guards for /chat/personal/stream
+# (TTLCache pattern from services/model_discovery.py): an identical request
+# replays the recorded SSE payload instead of paying another provider
+# round-trip, and concurrent identical requests wait for the in-flight leader
+# instead of fanning out. State is scoped to the event loop serving the
+# request — asyncio.Event is loop-affine, and a worker loop outlives every
+# request, so in production the cache spans the process lifetime while
+# per-request test loops stay isolated.
+STREAM_CACHE_TTL_SECONDS = 600
+_stream_state: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, tuple[TTLCache, dict[str, asyncio.Event]]
+] = weakref.WeakKeyDictionary()
+
+
+def _get_stream_state() -> tuple[TTLCache, dict[str, asyncio.Event]]:
+    loop = asyncio.get_running_loop()
+    state = _stream_state.get(loop)
+    if state is None:
+        state = (TTLCache(maxsize=256, ttl=STREAM_CACHE_TTL_SECONDS), {})
+        _stream_state[loop] = state
+    return state
+
+
+def build_stream_cache_key(
+    model: str,
+    system_prompt: str,
+    history: list[Any],
+    user_content: str,
+) -> str:
+    """SHA-256 over every input that changes the provider response."""
+    key_material = _json.dumps(
+        {
+            "model": model,
+            "system": system_prompt,
+            "history": [{"role": m.role, "content": m.content} for m in history],
+            "user": user_content,
+            "temperature": PERSONAL_CHAT_TEMPERATURE,
+            "max_tokens": PERSONAL_CHAT_MAX_TOKENS,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(key_material.encode("utf-8")).hexdigest()
 
 
 def dump_provider_context(provider_context: Any) -> dict[str, Any] | None:
@@ -306,77 +355,6 @@ def build_rag_context_and_citations(
 
 
 @router.post(
-    "/chat/personal",
-    response_model=PersonalChatResponse,
-    tags=["Core-API Integration"],
-    summary="Personal AI chat with RAG across enrolled courses",
-)
-async def personal_chat(request: PersonalChatRequest):
-    try:
-        llm = get_llm_service(
-            provider_context=resolve_provider_context(request.provider_context)
-        )
-        await llm.ensure_ready()
-
-        system_prompt = PERSONAL_CHAT_SYSTEM_PROMPT
-        citations = []
-
-        if request.course_ids:
-            resolved_ctx = resolve_provider_context(request.provider_context)
-            rag_results = await search_personal_rag(
-                request.message,
-                request.course_ids,
-                provider_context=resolved_ctx,
-            )
-            if rag_results:
-                context_str, citations = build_rag_context_and_citations(rag_results)
-                system_prompt += RAG_CONTEXT_PROMPT.format(context=context_str)
-                system_prompt += CITATION_INSTRUCTION
-
-        messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system_prompt},
-        ]
-
-        for msg in request.history[-20:]:
-            messages.append(
-                cast(
-                    ChatCompletionMessageParam,
-                    cast(Any, {"role": msg.role, "content": msg.content}),
-                )
-            )
-
-        messages.append(
-            cast(
-                ChatCompletionMessageParam,
-                cast(Any, {"role": "user", "content": request.message}),
-            )
-        )
-
-        response = await llm.client.chat.completions.create(
-            model=llm.model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=8192,
-        )
-
-        reply = (response.choices[0].message.content or "").strip()
-
-        return PersonalChatResponse(
-            reply=reply,
-            success=True,
-            citations=citations,
-        )
-
-    except Exception:
-        logger.exception("personal_chat_failed")
-        return PersonalChatResponse(
-            reply="Maaf, terjadi kesalahan. Silakan coba lagi.",
-            success=False,
-            error="Internal error",
-        )
-
-
-@router.post(
     "/chat/personal/stream",
     tags=["Core-API Integration"],
     summary="Personal AI chat with RAG and SSE streaming",
@@ -385,8 +363,13 @@ async def personal_chat_stream(request: PersonalChatRequest):
     resolved_ctx = resolve_provider_context(request.provider_context)
     llm = get_llm_service(provider_context=resolved_ctx)
 
+    # Prefix-cache friendly layout (DeepSeek/OpenAI prompt caching): the
+    # system prompt stays byte-identical across requests; the dynamic RAG
+    # context leads the user turn instead of being appended to the system
+    # prompt, where it would invalidate the provider's cached prefix.
     system_prompt = PERSONAL_CHAT_SYSTEM_PROMPT
     citations = []
+    context_block = ""
 
     if request.course_ids:
         rag_results = await search_personal_rag(
@@ -396,14 +379,19 @@ async def personal_chat_stream(request: PersonalChatRequest):
         )
         if rag_results:
             context_str, citations = build_rag_context_and_citations(rag_results)
-            system_prompt += RAG_CONTEXT_PROMPT.format(context=context_str)
-            system_prompt += CITATION_INSTRUCTION
+            context_block = RAG_CONTEXT_PROMPT.format(context=context_str)
+            context_block += CITATION_INSTRUCTION
 
+    user_content = (
+        f"{context_block}\n\n{request.message}" if context_block else request.message
+    )
+
+    history = request.history[-20:]
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
     ]
 
-    for msg in request.history[-20:]:
+    for msg in history:
         messages.append(
             cast(
                 ChatCompletionMessageParam,
@@ -414,27 +402,72 @@ async def personal_chat_stream(request: PersonalChatRequest):
     messages.append(
         cast(
             ChatCompletionMessageParam,
-            cast(Any, {"role": "user", "content": request.message}),
+            cast(Any, {"role": "user", "content": user_content}),
         )
     )
+
+    def sse(payload: dict) -> str:
+        return f"data: {_json.dumps(payload)}\n\n"
 
     async def event_generator():
         try:
             await llm.ensure_ready()
-            stream = await llm.client.chat.completions.create(
+            cache_key = build_stream_cache_key(
                 model=llm.model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=8192,
-                stream=True,
+                system_prompt=system_prompt,
+                history=history,
+                user_content=user_content,
             )
-            async for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta and delta.content:
-                    yield f"data: {_json.dumps({'content': delta.content})}\n\n"
 
-            if citations:
-                yield f"data: {_json.dumps({'citations': citations})}\n\n"
+            # Replay an identical completed stream without another provider
+            # round-trip; a concurrent identical request waits for the
+            # in-flight leader instead of fanning out.
+            chunk_cache, inflight = _get_stream_state()
+            while True:
+                cached_events = chunk_cache.get(cache_key)
+                if cached_events is not None:
+                    logger.info(
+                        "llm_prompt_cache", result="hit", cache_key=cache_key[:16]
+                    )
+                    for event in cached_events:
+                        yield sse(event)
+                    yield "data: [DONE]\n\n"
+                    return
+                pending = inflight.get(cache_key)
+                if pending is not None:
+                    await pending.wait()
+                    continue
+                break
+
+            logger.info("llm_prompt_cache", result="miss", cache_key=cache_key[:16])
+            leader = asyncio.Event()
+            inflight[cache_key] = leader
+            collected: list[dict] = []
+            try:
+                stream = await llm.client.chat.completions.create(
+                    model=llm.model,
+                    messages=messages,
+                    temperature=PERSONAL_CHAT_TEMPERATURE,
+                    max_tokens=PERSONAL_CHAT_MAX_TOKENS,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        event = {"content": delta.content}
+                        collected.append(event)
+                        yield sse(event)
+
+                if citations:
+                    event = {"citations": citations}
+                    collected.append(event)
+                    yield sse(event)
+
+                # Only completed streams enter the cache; failures never do.
+                chunk_cache[cache_key] = collected
+            finally:
+                inflight.pop(cache_key, None)
+                leader.set()
 
             yield "data: [DONE]\n\n"
         except Exception:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import asyncio
+import hashlib
 import importlib.util
 import logging
 from typing import Optional
@@ -29,6 +30,7 @@ except ImportError as exc:
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.redis_cache import get_redis_cache
 from concurrent.futures import ThreadPoolExecutor
 
 logger = get_logger(__name__)
@@ -36,6 +38,9 @@ logger = get_logger(__name__)
 _thread_pool = ThreadPoolExecutor(max_workers=2)
 
 DEFAULT_MAX_IMAGE_SIZE = (1000, 1000)
+
+VISION_CAPTION_CACHE_PREFIX = "kolabri:vision:caption"
+VISION_CAPTION_CACHE_TTL = 604800  # 7 hari
 
 
 def initialize_ocr_engine() -> Optional[PaddleOCR]:
@@ -167,6 +172,41 @@ async def run_page_ocr(
         del image
 
 
+def _vision_caption_cache_key(img_bytes: bytes, model: str, prompt: str) -> str:
+    """Key = sha256(bytes JPEG persis yang dikirim ke provider + model + prompt).
+
+    Bytes asli menangkap beda ukuran/format konten gambar; model & prompt
+    dipisah delimiter supaya tidak ada collision antar kombinasi.
+    """
+    digest = hashlib.sha256()
+    digest.update(img_bytes)
+    digest.update(b"\x00")
+    digest.update(model.encode("utf-8"))
+    digest.update(b"\x00")
+    digest.update(prompt.encode("utf-8"))
+    return f"{VISION_CAPTION_CACHE_PREFIX}:{digest.hexdigest()}"
+
+
+async def _vision_caption_cache_get(key: str) -> Optional[str]:
+    """Fail-open: error Redis tidak boleh menggagalkan caption/ingest."""
+    try:
+        redis_cache = await get_redis_cache()
+        cached = await redis_cache.get(key)
+        return cached if isinstance(cached, str) else None
+    except Exception:
+        logger.exception("vision_caption_cache_get_failed")
+        return None
+
+
+async def _vision_caption_cache_set(key: str, caption: str) -> None:
+    """Fail-open: gagal simpan cache tidak mengubah hasil caption."""
+    try:
+        redis_cache = await get_redis_cache()
+        await redis_cache.set(key, caption, ttl=VISION_CAPTION_CACHE_TTL)
+    except Exception:
+        logger.exception("vision_caption_cache_set_failed")
+
+
 async def generate_image_caption(
     image: Image.Image,
     *,
@@ -190,6 +230,17 @@ async def generate_image_caption(
         prepared_image.save(img_buffer, format="JPEG", quality=85)
         img_bytes = img_buffer.getvalue()
         img_buffer.close()
+
+        cache_key = _vision_caption_cache_key(
+            img_bytes, settings.OPENAI_MODEL, prompt
+        )
+        cached_caption = await _vision_caption_cache_get(cache_key)
+        if cached_caption:
+            if prepared_image is not image:
+                prepared_image.close()
+            logger.info("vision_caption_cache", result="hit")
+            return cached_caption
+        logger.info("vision_caption_cache", result="miss")
 
         loop = asyncio.get_running_loop()
 
@@ -221,7 +272,10 @@ async def generate_image_caption(
         if prepared_image is not image:
             prepared_image.close()
 
-        return response.choices[0].message.content.strip()
+        caption = response.choices[0].message.content.strip()
+        if caption:
+            await _vision_caption_cache_set(cache_key, caption)
+        return caption
     except Exception:
         logger.exception("vision_api_failed")
         return ""

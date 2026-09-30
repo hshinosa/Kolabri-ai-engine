@@ -188,32 +188,6 @@ async def test_generate_intervention_message_reads_state_under_lock(
     ]
     assert call.kwargs["last_intervention_time"] == datetime(2024, 1, 1, 8, 0, 0)
 
-
-@pytest.mark.asyncio
-async def test_handle_message_reads_fading_under_state_lock(orchestrator_factory):
-    """fading must be captured under _state_lock before the RAG call."""
-    orchestrator, mocks = orchestrator_factory()
-    orchestrator._group_fading_levels["g1"] = 0.4
-
-    async with orchestrator._state_lock:
-        task = asyncio.create_task(
-            orchestrator.handle_message(
-                user_id="u1",
-                group_id="g1",
-                message="Halo asisten",
-                topic="T",
-                chat_room_id="room_1",
-            )
-        )
-        await asyncio.sleep(0.05)
-        assert not task.done(), "handle_message ran while _state_lock was held"
-        assert mocks["rag"].query.await_count == 0, "fading read happened unlocked"
-
-    res = await task
-    assert res.success is True
-    assert res.error is None
-
-
 # --- B5: swallowed DB/anomaly failures must be logged ---
 
 

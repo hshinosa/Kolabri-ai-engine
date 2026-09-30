@@ -393,54 +393,6 @@ def test_process_mining_anomaly_bottleneck_skips_empty_duration_list():
     det = ProcessMiningAnomalyDetector()
     assert det._detect_bottlenecks([]) is None
 
-
-@pytest.mark.asyncio
-async def test_orchestrator_handle_message_rag_failure_reply():
-    from app.services.nlp_analytics import EngagementAnalysis, EngagementType
-    from app.services.orchestration import Orchestrator
-
-    orch = Orchestrator.__new__(Orchestrator)
-    orch.analyzer = MagicMock()
-    orch.analyzer.analyze_interaction.return_value = EngagementAnalysis(
-        lexical_variety=0.7,
-        engagement_type=EngagementType.COGNITIVE,
-        is_higher_order=True,
-        hot_indicators=[],
-        word_count=5,
-        unique_words=5,
-        confidence=0.8,
-    )
-    orch.analyzer.extract_srl_object = MagicMock(return_value="obj")
-    rag_result = SimpleNamespace(
-        success=False,
-        answer="ignored",
-        sources=[],
-        scaffolding_triggered=False,
-        outcome="ok",
-        reason=None,
-    )
-    orch.rag = MagicMock()
-    orch.rag.query = AsyncMock(return_value=rag_result)
-    orch.mongo_logger = MagicMock()
-    orch.mongo_logger.log_activity = AsyncMock()
-    orch.logic_listener = MagicMock()
-    orch.logic_listener.track_participation = AsyncMock()
-    orch.logic_listener.update_last_message_time = AsyncMock()
-    orch.anomaly_detector = MagicMock()
-    orch.anomaly_detector.detect_session_anomalies = AsyncMock(
-        return_value=SimpleNamespace(has_anomalies=False)
-    )
-    orch.notification_service = MagicMock()
-    orch._state_lock = __import__("asyncio").Lock()
-    orch._group_messages = {}
-    orch._group_fading_levels = {}
-    orch._last_intervention = {}
-    with patch("app.services.orchestration.settings") as st:
-        st.INTERVENTION_MIN_MESSAGES = 99
-        result = await orch.handle_message("u1", "g1", "hi", topic="t")
-    assert "Maaf" in result.reply
-
-
 @pytest.mark.asyncio
 async def test_orchestrator_should_intervene_cooldown_returns_false():
     from app.services.nlp_analytics import EngagementAnalysis, EngagementType

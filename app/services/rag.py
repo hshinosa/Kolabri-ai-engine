@@ -8,13 +8,21 @@ Includes Policy Agent for retrieval optimization and pedagogical guardrails.
 from typing import Optional, List, Dict, Any, Tuple, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
+import json
 import math
+
+from cachetools import TTLCache
 
 from app.core.logging import get_logger
 from app.core.guardrails import get_guardrails, GuardrailAction, GuardrailResult
 from app.core.config import settings
 from app.core.prompt_templates import (
+    COT_RAG_TEMPLATE,
+    COT_RAG_WITH_HISTORY,
+    RAG_FEW_SHOT,
     SYSTEM_PERSONAL_CHAT,
+    SYSTEM_RAG,
     SYSTEM_RAG_NO_CONTEXT,
     TEMPERATURE,
 )
@@ -28,6 +36,55 @@ from app.services.efficiency_guard import get_efficiency_guard, EfficiencyGuard
 logger = get_logger(__name__)
 
 ProviderContext = Dict[str, Any]
+
+# Chunk-replay cache for query_stream NO_FETCH (TTLCache pattern from
+# services/model_discovery.py): an identical request replays the recorded
+# chunks instead of paying another provider round-trip. Only completed
+# streams enter the cache; failures never do.
+STREAM_CACHE_TTL_SECONDS = 600
+_stream_chunk_cache: TTLCache = TTLCache(maxsize=256, ttl=STREAM_CACHE_TTL_SECONDS)
+
+# Prefix-cache friendly prompt layout: the system prompt stays byte-identical
+# across requests while the dynamic blocks (retrieval context, instructions)
+# lead the user turn. The shared templates are only split here — every
+# fragment sent to the model comes verbatim from prompt_templates; only block
+# positions change, and chat history rides as ordered messages instead of a
+# block inside the user turn.
+_RAG_PRE_QUERY, _RAG_POST_QUERY = COT_RAG_TEMPLATE.split("{query}", 1)
+_RAG_CTX_BLOCK, _RAG_LABEL = _RAG_PRE_QUERY.rsplit("\n\n", 1)
+_RAG_INSTRUCTIONS = _RAG_POST_QUERY.rsplit("Jawaban:", 1)[0]
+_RAG_CUE = _RAG_POST_QUERY[len(_RAG_INSTRUCTIONS):]
+
+_HIST_REST = COT_RAG_WITH_HISTORY.split("{history}", 1)[1]
+_HIST_PRE_QUERY, _HIST_POST_QUERY = _HIST_REST.split("{query}", 1)
+_HIST_CTX_BLOCK, _HIST_LABEL = _HIST_PRE_QUERY.lstrip("\n").rsplit("\n\n", 1)
+_HIST_INSTRUCTIONS = _HIST_POST_QUERY.rsplit("Jawaban:", 1)[0]
+_HIST_CUE = _HIST_POST_QUERY[len(_HIST_INSTRUCTIONS):]
+
+
+def _build_stream_cache_key(
+    system_prompt: str,
+    prompt: str,
+    history: Optional[List[ChatMessage]],
+    model: Any,
+    max_tokens: Any,
+) -> str:
+    """SHA-256 over every input that changes the provider response."""
+    key_material = json.dumps(
+        {
+            "model": str(model or ""),
+            "system": system_prompt,
+            "prompt": prompt,
+            "temperature": TEMPERATURE["personal_chat"],
+            "max_tokens": str(max_tokens or ""),
+            "history": [
+                {"role": m.role, "content": m.content} for m in (history or [])
+            ],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(key_material.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -692,12 +749,38 @@ class RAGPipeline:
                 scaffolding_ctx = (
                     f"Scaffolding level for this cohort: {level}. {style}"
                 )
-        llm_response = await self.llm_service.generate_rag_response(
-            query=query,
-            contexts=contexts,
+
+        # Prefix-cache friendly layout: system = static base instructions only;
+        # the dynamic blocks (retrieval context, scaffolding, instructions)
+        # lead the user turn, the query follows, and chat history rides as
+        # ordered messages before it — so the provider's cached prefix of the
+        # system prompt stays byte-identical across requests.
+        if chat_history:
+            ctx_block_tpl, label, instructions, cue = (
+                _HIST_CTX_BLOCK,
+                _HIST_LABEL,
+                _HIST_INSTRUCTIONS,
+                _HIST_CUE,
+            )
+        else:
+            ctx_block_tpl, label, instructions, cue = (
+                _RAG_CTX_BLOCK,
+                _RAG_LABEL,
+                _RAG_INSTRUCTIONS,
+                _RAG_CUE,
+            )
+
+        context_block = ctx_block_tpl.format(
+            contexts=self.llm_service._format_contexts(contexts)
+        )
+        if scaffolding_ctx:
+            context_block += f"\n\n{scaffolding_ctx}"
+
+        llm_response = await self.llm_service.generate(
+            prompt=f"{context_block}{instructions}{label}{query}\n\n{cue}",
+            system_prompt=SYSTEM_RAG + "\n\n" + RAG_FEW_SHOT,
+            temperature=TEMPERATURE["rag"],
             chat_history=chat_history,
-            fading_level=fading_level,
-            context=scaffolding_ctx,
         )
         return llm_response
 
@@ -963,6 +1046,32 @@ class RAGPipeline:
                 history_text = "\n".join(history_lines)
                 no_fetch_prompt = f"Riwayat percakapan:\n{history_text}\n\nPertanyaan terbaru mahasiswa: {query}"
 
+            cache_key = _build_stream_cache_key(
+                system_prompt=SYSTEM_PERSONAL_CHAT,
+                prompt=no_fetch_prompt,
+                history=chat_history,
+                model=getattr(self.llm_service, "model", None),
+                max_tokens=getattr(self.llm_service, "max_tokens", None),
+            )
+
+            cached_chunks = _stream_chunk_cache.get(cache_key)
+            if cached_chunks is not None:
+                logger.info(
+                    "rag_stream_no_fetch_cache",
+                    result="hit",
+                    cache_key=cache_key[:16],
+                )
+                for chunk in cached_chunks:
+                    yield {"type": "token", "content": chunk}
+                yield {"type": "done", "sources": [], "citations": []}
+                return
+
+            logger.info(
+                "rag_stream_no_fetch_cache",
+                result="miss",
+                cache_key=cache_key[:16],
+            )
+            collected: List[str] = []
             try:
                 async for chunk in self.llm_service.stream_generate(
                     prompt=no_fetch_prompt,
@@ -970,7 +1079,10 @@ class RAGPipeline:
                     temperature=TEMPERATURE["personal_chat"],
                     chat_history=chat_history,
                 ):
+                    collected.append(chunk)
                     yield {"type": "token", "content": chunk}
+                # Only completed streams enter the cache; failures never do.
+                _stream_chunk_cache[cache_key] = collected
                 yield {"type": "done", "sources": [], "citations": []}
             except Exception:
                 logger.exception("rag_stream_no_fetch_failed", query=query[:100])

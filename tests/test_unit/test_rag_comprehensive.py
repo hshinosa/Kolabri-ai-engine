@@ -33,12 +33,15 @@ def mock_llm():
             content="Test response", tokens_used=50, success=True, error=None
         )
     )
-    mock.generate_rag_response = AsyncMock(
-        return_value=MagicMock(
-            content="RAG response", tokens_used=100, success=True, error=None
+    mock.reframe_to_socratic = AsyncMock(return_value="Reframed response")
+    # Contexts reach generation inside the leading user prompt; render the
+    # sources so tests can inspect what was actually sent.
+    mock._format_contexts = MagicMock(
+        side_effect=lambda contexts: "\n\n".join(
+            f"[Sumber: {c.get('metadata', {}).get('source', '-')}] {c.get('content', '')}"
+            for c in contexts
         )
     )
-    mock.reframe_to_socratic = AsyncMock(return_value="Reframed response")
     return mock
 
 
@@ -299,11 +302,10 @@ class TestRAGPipeline:
         mock_vector_store.search.assert_awaited_once()
         assert mock_vector_store.search.await_args.kwargs["n_results"] == 4
         mock_reranker.rerank.assert_awaited_once()
-        generate_kwargs = mock_llm.generate_rag_response.await_args.kwargs
-        assert [ctx["metadata"]["source"] for ctx in generate_kwargs["contexts"]] == [
-            "b.pdf",
-            "a.pdf",
-        ]
+        prompt = mock_llm.generate.await_args.kwargs["prompt"]
+        # reranked contexts reach the generation call in reranker order
+        assert "b.pdf" in prompt and "a.pdf" in prompt
+        assert prompt.index("b.pdf") < prompt.index("a.pdf")
 
     @pytest.mark.asyncio
     async def test_query_uses_internal_runtime_plan_resolution(
@@ -414,11 +416,10 @@ class TestRAGPipeline:
             result = await pipeline.query("Jelaskan machine learning dan deep learning")
 
         assert result.success is True
-        generate_kwargs = mock_llm.generate_rag_response.await_args.kwargs
-        assert [ctx["metadata"]["source"] for ctx in generate_kwargs["contexts"]] == [
-            "a.pdf",
-            "b.pdf",
-        ]
+        prompt = mock_llm.generate.await_args.kwargs["prompt"]
+        # reranker blew up: fallback vector order must reach the generation call
+        assert "a.pdf" in prompt and "b.pdf" in prompt
+        assert prompt.index("a.pdf") < prompt.index("b.pdf")
 
     @pytest.mark.asyncio
     async def test_query_no_results(
@@ -612,11 +613,9 @@ class TestRAGScaffoldingContext:
                     }
                 },
             )
-        ctx = rag_pipeline.llm_service.generate_rag_response.await_args.kwargs.get(
-            "context"
-        )
-        assert ctx is not None
-        assert "early" in ctx.lower()
+        prompt = rag_pipeline.llm_service.generate.await_args.kwargs["prompt"]
+        assert "Scaffolding level for this cohort: early." in prompt
+        assert "early" in prompt.lower()
 
     @pytest.mark.asyncio
     async def test_query_passes_late_scaffolding_context(
@@ -642,11 +641,9 @@ class TestRAGScaffoldingContext:
                     "scaffolding_config": {"enabled": True, "scaffolding_level": "late"}
                 },
             )
-        ctx = rag_pipeline.llm_service.generate_rag_response.await_args.kwargs.get(
-            "context"
-        )
-        assert ctx is not None
-        assert "late" in ctx.lower()
+        prompt = rag_pipeline.llm_service.generate.await_args.kwargs["prompt"]
+        assert "Scaffolding level for this cohort: late." in prompt
+        assert "late" in prompt.lower()
 
 
 class TestGetRAGPipeline:

@@ -491,3 +491,24 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "requires_mongodb: marks tests that require MongoDB connection"
     )
+
+
+@pytest.fixture(autouse=True)
+def isolate_llm_stream_caches():
+    """Clear module-level streaming chunk caches between tests.
+
+    These caches are intentional cross-request provider-response caches in
+    production; leaking them across tests made identical-payload tests replay
+    each other's output and fail depending on execution order.
+    """
+    import importlib
+
+    for module_name in ("app.api.routes.chat", "app.services.rag"):
+        module = importlib.import_module(module_name)
+        cache = getattr(module, "_stream_chunk_cache", None)
+        if cache is not None:
+            cache.clear()
+        inflight = getattr(module, "_stream_inflight", None)
+        if inflight is not None:
+            inflight.clear()
+    yield

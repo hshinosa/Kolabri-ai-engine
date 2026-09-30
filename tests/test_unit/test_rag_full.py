@@ -39,7 +39,8 @@ async def test_query_no_fetch_policy(rag_pipeline, mock_deps):
 async def test_query_fetch_success(rag_pipeline, mock_deps):
     mock_deps['gr'].check_input.return_value = GuardrailResult(action=GuardrailAction.ALLOW, reason='safe')
     mock_deps['vs'].search.return_value = [{'content': 'ctx1', 'metadata': {'source': 's1'}, 'score': 0.9}]
-    mock_deps['llm'].generate_rag_response.return_value = MagicMock(content='RAG Ans', success=True)
+    mock_deps['llm'].generate.return_value = MagicMock(content='RAG Ans', success=True)
+    mock_deps['llm']._format_contexts = MagicMock(return_value='ctx1')
     mock_deps['gr'].check_output.return_value = GuardrailResult(action=GuardrailAction.ALLOW, reason='safe')
     async def side_effect(*args, **kwargs):
         func = kwargs.get('query_func')
