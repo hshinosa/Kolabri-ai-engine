@@ -3,8 +3,8 @@ Orchestration endpoint — main chat pipeline.
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 import json as _json
 
 from app.core.config import settings

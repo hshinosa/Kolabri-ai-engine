@@ -7,7 +7,7 @@ for Process Mining and student analytics.
 
 import csv
 import io
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import structlog

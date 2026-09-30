@@ -181,6 +181,20 @@ class EmbeddingConfigUpdate(BaseModel):
     provider: str = Field(..., description="Target provider: 'voyage' or 'local'")
 
 
+class EmbeddingConfigUpdateData(BaseModel):
+    """Details of the newly active embedding provider."""
+
+    provider: str
+    activeService: str
+    dimension: int | None = None
+
+
+class EmbeddingConfigUpdateResponse(BaseModel):
+    """Response after switching embedding provider."""
+
+    data: EmbeddingConfigUpdateData
+
+
 @router.get("/embedding-config", response_model=EmbeddingConfigResponse)
 async def get_embedding_config() -> EmbeddingConfigResponse:
     """Report the active embedding provider and its configuration."""
@@ -200,7 +214,7 @@ async def get_embedding_config() -> EmbeddingConfigResponse:
     )
 
 
-@router.put("/embedding-config")
+@router.put("/embedding-config", response_model=EmbeddingConfigUpdateResponse)
 async def update_embedding_config(request: EmbeddingConfigUpdate) -> dict:
     """Switch embedding provider at runtime (voyage <-> local)."""
     from app.core.config import settings

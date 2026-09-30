@@ -472,7 +472,9 @@ def test_goal_refinement_failure(mock_get_orchestrator):
 @patch("app.api.routes.groups.get_orchestrator")
 def test_check_group_status_success(mock_get_orchestrator):
     mock_orchestrator = MagicMock()
-    mock_orchestrator.check_group_status = AsyncMock(
+    # Synchronous contract: the real orchestrator method is NOT a coroutine;
+    # mocking it as AsyncMock hid a production await-TypeError -> 500.
+    mock_orchestrator.check_group_status = MagicMock(
         return_value={"should_intervene": True, "interventions": ["prompt"]}
     )
     mock_get_orchestrator.return_value = mock_orchestrator
@@ -1548,7 +1550,7 @@ def test_validate_course_id_rejects_invalid_characters():
 @patch("app.api.routes.groups.get_orchestrator")
 def test_check_group_status_failure(mock_get_orchestrator):
     mock_orchestrator = MagicMock()
-    mock_orchestrator.check_group_status = AsyncMock(
+    mock_orchestrator.check_group_status = MagicMock(
         side_effect=Exception("status down")
     )
     mock_get_orchestrator.return_value = mock_orchestrator

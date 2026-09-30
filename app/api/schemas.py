@@ -8,7 +8,6 @@ Pydantic models for API validation.
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
-import re
 
 
 # ============== Health Check ==============
@@ -99,6 +98,13 @@ class DocumentListResponse(BaseModel):
     success: bool
     documents: List[DocumentInfo]
     total: int
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response after deleting a document from the vector store."""
+
+    success: bool
+    message: str
 
 
 # ============== RAG Query ==============
@@ -234,6 +240,43 @@ class QueryResponse(BaseModel):
     tokens_used: int = 0
     processing_time_ms: float = 0
     error: Optional[str] = None
+
+
+# ============== Goal Validation ==============
+
+
+class GoalValidateResponse(BaseModel):
+    """Response from SMART goal validation."""
+
+    is_valid: bool
+    status: str  # accepted or revise
+    score: float
+    feedback: str
+    socratic_hint: Optional[str] = None
+    missing_criteria: List[str] = []
+    details: Dict[str, bool] = {}
+    success: bool = True
+
+
+class GoalRefineResponse(BaseModel):
+    """Response from SMART goal refinement."""
+
+    success: bool
+    refined_goal: Optional[str] = None
+    explanation: Optional[str] = None
+    suggestions: List[str] = []
+    validation: Optional[Dict[str, Any]] = None
+    tokens_used: Optional[int] = None
+    error: Optional[str] = None
+
+
+# ============== Group Actions ==============
+
+
+class GroupActionResponse(BaseModel):
+    """Response from a group Logic Listener action (track, timestamp, topic)."""
+
+    status: str
 
 
 # ============== Chat Intervention ==============
@@ -518,3 +561,55 @@ class PersonalChatResponse(BaseModel):
 class TrackActivityRequest(BaseModel):
     group_id: str
     user_id: Optional[str] = None
+
+
+class TrackActivityResponse(BaseModel):
+    """Response after tracking group activity for silence detection."""
+
+    success: bool
+
+
+# ============== Monitoring ==============
+
+
+class MonitoringStatusResponse(BaseModel):
+    """Response from /health/monitoring."""
+
+    uptime_seconds: float
+    uptime_human: str
+    metrics_available: bool
+    metrics_endpoint: str
+
+
+class CircuitBreakerMetrics(BaseModel):
+    """Metrics for a single circuit breaker."""
+
+    name: str
+    state: str  # closed, open, half_open
+    failure_count: int
+    success_count: int
+    total_calls: int
+    successful_calls: int
+    failed_calls: int
+    rejected_calls: int
+    success_rate: float
+
+
+class CircuitBreakerStatusResponse(BaseModel):
+    """Response from /health/circuit-breakers."""
+
+    llm_service: CircuitBreakerMetrics
+
+
+class RerankerStatusResponse(BaseModel):
+    """Response from /health/reranker."""
+
+    enabled: bool
+    model_loaded: bool
+    model_name: str
+    top_k: int
+    retrieve_k: int
+    total_reranks: int
+    cache_hits: int
+    cache_hit_rate: float
+    avg_rerank_time_ms: float

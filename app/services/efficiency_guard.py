@@ -16,9 +16,8 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional
 from collections import defaultdict, deque
-import time
 
 from app.core.logging import get_logger
 from app.core.config import settings
@@ -278,9 +277,8 @@ class EfficiencyGuard:
                         hit_count=entry.hit_count + 1,
                     )
                     return entry.access()
-                else:
-                    # Remove expired entry
-                    del self.cache[cache_key]
+                # Remove expired entry
+                del self.cache[cache_key]
 
         self.cache_misses += 1
         logger.debug("cache_miss", query_key=cache_key[:16])
@@ -364,8 +362,7 @@ class EfficiencyGuard:
             return await self.query_deduplicator.execute_or_wait(
                 query_key, execute_query
             )
-        else:
-            return await execute_query()
+        return await execute_query()
 
     def check_rate_limit(self, identifier: str) -> bool:
         """

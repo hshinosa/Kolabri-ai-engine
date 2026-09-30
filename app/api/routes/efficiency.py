@@ -2,7 +2,7 @@
 Efficiency Guard endpoints — caching, rate limiting, performance stats.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings

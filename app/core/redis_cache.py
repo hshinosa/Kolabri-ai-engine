@@ -18,7 +18,7 @@ import json
 import hashlib
 import asyncio
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime
 import redis.asyncio as redis
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -139,9 +139,8 @@ class RedisCache:
                 if result:
                     await self._redis.expire(key, ttl)
                 return result
-            else:
-                await self._redis.setex(key, ttl, serialized)
-                return True
+            await self._redis.setex(key, ttl, serialized)
+            return True
         except Exception:
             logger.exception("redis_set_error", key=key)
             return False

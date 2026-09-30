@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.schemas import TrackActivityRequest
+from app.api.schemas import TrackActivityRequest, TrackActivityResponse
 from app.services.logic_listener import get_logic_listener
 
 router = APIRouter()
@@ -10,6 +10,7 @@ router = APIRouter()
 
 @router.post(
     "/track-activity",
+    response_model=TrackActivityResponse,
     tags=["Analytics"],
     summary="Track group activity for Logic Listener silence detection",
 )

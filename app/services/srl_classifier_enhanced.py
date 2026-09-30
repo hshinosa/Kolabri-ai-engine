@@ -201,11 +201,6 @@ class EnhancedSRLClassifier:
             return self._create_default_result()
 
         message_lower = message.lower()
-        scores = {
-            SRLPhase.FORETHOUGHT: {},
-            SRLPhase.PERFORMANCE: {},
-            SRLPhase.REFLECTION: {},
-        }
         indicators = []
         matched_patterns = []
 
@@ -358,7 +353,7 @@ class EnhancedSRLClassifier:
                 SRLPhase.REFLECTION: "INTENSIVE: Guided reflection template + structured self-assessment rubric",
             }
             return intensified_actions.get(phase, "Provide intensive support")
-        elif confidence > 0.8:
+        if confidence > 0.8:
             # High confidence - reduce scaffolding
             reduced_actions = {
                 SRLPhase.FORETHOUGHT: "Light guidance only - trust student goal clarity",
@@ -366,9 +361,8 @@ class EnhancedSRLClassifier:
                 SRLPhase.REFLECTION: "Student-led reflection - facilitator just listens",
             }
             return reduced_actions.get(phase, "Offer minimal support")
-        else:
-            # Medium confidence - use default scaffolding
-            return base_action
+        # Medium confidence - use default scaffolding
+        return base_action
 
     def _suggest_intervention(self, phase: SRLPhase) -> str:
         """Suggest intervention type based on phase."""
@@ -383,10 +377,9 @@ class EnhancedSRLClassifier:
         """Calculate priority level based on confidence and phase."""
         if confidence < 0.4:
             return "LOW"
-        elif confidence > 0.7 and phase == SRLPhase.REFLECTION:
+        if confidence > 0.7 and phase == SRLPhase.REFLECTION:
             return "HIGH"
-        else:
-            return "MEDIUM"
+        return "MEDIUM"
 
 
 # Singleton instance

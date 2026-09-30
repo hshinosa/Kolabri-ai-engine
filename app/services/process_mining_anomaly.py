@@ -5,14 +5,13 @@ Detects deviations in learning process patterns based on XES event logs.
 Identifies bottlenecks, sequence skips, and engagement anomalies.
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 import statistics
 
 from app.core.logging import get_logger
-from app.core.config import settings
 from app.services.mongodb_logger import MongoDBLogger, get_mongo_logger
 from app.services.conformance_checker import ConformanceChecker
 
@@ -709,7 +708,7 @@ class ProcessMiningAnomalyDetector:
             
             # Calculate metrics for each session
             session_metrics = []
-            for session_discussion_id, session_events in session_discussion_events.items():
+            for session_events in session_discussion_events.values():
                 metrics = self._calculate_session_metrics(session_events)
                 session_metrics.append(metrics)
             

@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from app.services.document_processing.models import ProcessedDocument, ProcessedChunk
+from app.services.document_processing.models import ProcessedDocument
 
 OCR_IMPORT_ERROR: Optional[str] = None
 try:

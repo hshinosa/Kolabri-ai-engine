@@ -7,7 +7,6 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.api.schemas import HealthResponse
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.reranker import get_reranker
 from app.services.vector_store import get_vector_store

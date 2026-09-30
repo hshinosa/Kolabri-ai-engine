@@ -2,7 +2,7 @@
 Intervention endpoints — analyze, summary, prompt.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.core.config import settings
 from app.core.logging import get_logger

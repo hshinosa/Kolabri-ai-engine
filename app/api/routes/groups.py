@@ -4,10 +4,10 @@ Group monitoring & Logic Listener endpoints.
 
 from typing import Optional, Any
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Form, Query
 from fastapi.responses import JSONResponse
 
-from app.api.schemas import ProviderContextV1
+from app.api.schemas import GroupActionResponse, ProviderContextV1
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.orchestration import get_orchestrator
@@ -58,7 +58,9 @@ async def check_group_status(
                 pass
         orchestrator = get_orchestrator(provider_context=parsed_ctx)
 
-        result = await orchestrator.check_group_status(group_id=group_id, topic=topic)
+        # check_group_status is synchronous (orchestrator -> logic listener);
+        # awaiting it raised TypeError and turned every call into a 500.
+        result = orchestrator.check_group_status(group_id=group_id, topic=topic)
 
         logger.info(
             "group_status_check_api",
@@ -76,6 +78,7 @@ async def check_group_status(
 
 @router.post(
     "/groups/{group_id}/track-participation",
+    response_model=GroupActionResponse,
     tags=["Groups"],
     summary="Track user participation for Logic Listener",
 )
@@ -112,6 +115,7 @@ async def track_participation(
 
 @router.post(
     "/groups/{group_id}/update-last-message",
+    response_model=GroupActionResponse,
     tags=["Groups"],
     summary="Update last message timestamp for Logic Listener",
 )
@@ -143,6 +147,7 @@ async def update_last_message_time(
 
 @router.post(
     "/groups/{group_id}/set-topic",
+    response_model=GroupActionResponse,
     tags=["Groups"],
     summary="Set the topic for a group for Logic Listener",
 )

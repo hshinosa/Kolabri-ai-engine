@@ -6,7 +6,6 @@ Structured logging setup using structlog.
 
 import logging
 import sys
-from typing import Any
 
 import structlog
 from structlog.typing import Processor

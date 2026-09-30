@@ -142,8 +142,8 @@ class VectorStoreService:
             embeddings = embeddings[: len(documents)]
 
         points = []
-        for i, (doc, meta, doc_id, embedding) in enumerate(
-            zip(documents, metadatas, ids, embeddings, strict=True)
+        for doc, meta, doc_id, embedding in zip(
+            documents, metadatas, ids, embeddings, strict=True
         ):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id))
             payload = {**meta, "content": doc, "document_id": doc_id}

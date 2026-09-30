@@ -530,7 +530,6 @@ class GoalValidator:
 
             # Parse JSON response
             import json
-            import sys
 
             try:
                 # Ensure response content is properly encoded

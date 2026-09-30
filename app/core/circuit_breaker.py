@@ -17,7 +17,7 @@ Issue: KOL-42 - High Performance Targets
 
 import asyncio
 import time
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Dict, Any
 from enum import Enum
 from dataclasses import dataclass
 from functools import wraps

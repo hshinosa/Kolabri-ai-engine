@@ -4,10 +4,9 @@ Application Configuration
 Pydantic settings for environment variable management.
 """
 
-import os
 import logging
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 from functools import lru_cache

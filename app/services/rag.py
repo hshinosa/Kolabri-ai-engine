@@ -5,13 +5,13 @@ Combines vector search with LLM for context-aware responses.
 Includes Policy Agent for retrieval optimization and pedagogical guardrails.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
 import math
 
 from app.core.logging import get_logger
-from app.core.guardrails import get_guardrails, GuardrailAction
+from app.core.guardrails import get_guardrails, GuardrailAction, GuardrailResult
 from app.core.config import settings
 from app.core.prompt_templates import (
     SYSTEM_PERSONAL_CHAT,
@@ -302,19 +302,540 @@ class RAGPipeline:
                 reason="material_list_query",
             )
 
-        from app.services.week_rag import (
-            rank_week_boosted_results,
-            sources_to_citations,
-            week_metadata_filter,
+        effective_filter = self._build_effective_filter(
+            filter_metadata, max_week_index
         )
+
+        # Build context for caching
+        cache_context = self._build_cache_context(
+            collection_name=collection_name,
+            n_results=n_results,
+            effective_filter=effective_filter,
+            score_threshold=score_threshold,
+            chat_history=chat_history,
+        )
+
+        # Define the query execution function
+        async def execute_rag_query():
+            return await self._execute_rag_query(
+                query=query,
+                collection_name=collection_name,
+                n_results=n_results,
+                chat_history=chat_history,
+                effective_filter=effective_filter,
+                score_threshold=score_threshold,
+                guardrail_context=guardrail_context,
+                session_week_index=session_week_index,
+                fading_level=fading_level,
+                start_time=start_time,
+            )
+
+        # Use Efficiency Guard if enabled
+        return await self._run_with_cache(query, cache_context, execute_rag_query)
+
+    async def _execute_rag_query(
+        self,
+        query: str,
+        collection_name: Optional[str],
+        n_results: int,
+        chat_history: Optional[List[ChatMessage]],
+        effective_filter: Optional[Dict[str, Any]],
+        score_threshold: Optional[float],
+        guardrail_context: Optional[Dict[str, Any]],
+        session_week_index: Optional[int],
+        fading_level: float,
+        start_time: datetime,
+    ) -> RAGResult:
+        """Run the guarded RAG pipeline for a single query (without the cache layer)."""
+        try:
+            guardrail_result, blocked_result = self._check_input_guardrails(
+                query, guardrail_context, start_time
+            )
+            if blocked_result is not None:
+                return blocked_result
+
+            # Use sanitized input if available
+            safe_query = guardrail_result.sanitized_input or query
+
+            search_query = self._rewrite_search_query(safe_query, chat_history)
+
+            # Step 1: Policy decision - FETCH or NO_FETCH
+            should_fetch = self._should_retrieve(search_query, self._last_contexts)
+            action_taken = "FETCH" if should_fetch else "NO_FETCH"
+
+            if not should_fetch:
+                return await self._answer_no_fetch(
+                    query, safe_query, chat_history, start_time
+                )
+
+            # Step 1: FETCH - Search vector store (with semantic cache optimization)
+            logger.info(
+                "rag_search_started",
+                query=query[:100],
+                collection=collection_name,
+                action=action_taken,
+            )
+
+            contexts, search_results, empty_result = await self._retrieve_contexts(
+                query=query,
+                safe_query=safe_query,
+                search_query=search_query,
+                collection_name=collection_name,
+                n_results=n_results,
+                effective_filter=effective_filter,
+                score_threshold=score_threshold,
+                session_week_index=session_week_index,
+                chat_history=chat_history,
+                start_time=start_time,
+            )
+            if empty_result is not None:
+                return empty_result
+
+            # Step 3: Generate response with RAG
+            llm_response = await self._synthesize_answer(
+                query=query,
+                contexts=contexts,
+                chat_history=chat_history,
+                fading_level=fading_level,
+                guardrail_context=guardrail_context,
+            )
+
+            # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
+            ungrounded_result = await self._verify_grounding(
+                llm_response=llm_response,
+                query=query,
+                contexts=contexts,
+                search_results=search_results,
+                start_time=start_time,
+            )
+            if ungrounded_result is not None:
+                return ungrounded_result
+
+            # Step 4: Output Guardrails (Pedagogy)
+            scaffolding_triggered, output_blocked = await self._apply_output_guardrails(
+                llm_response=llm_response,
+                query=query,
+                contexts=contexts,
+                guardrail_context=guardrail_context,
+                start_time=start_time,
+            )
+            if output_blocked is not None:
+                return output_blocked
+
+            # Step 5: Extract sources
+            sources, citations = self._extract_sources_and_citations(search_results)
+
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+
+            logger.info(
+                "rag_query_complete",
+                query=query[:100],
+                num_sources=len(sources),
+                processing_time_ms=processing_time,
+            )
+
+            return RAGResult(
+                answer=llm_response.content,
+                sources=sources,
+                query=query,
+                tokens_used=llm_response.tokens_used,
+                success=llm_response.success,
+                scaffolding_triggered=scaffolding_triggered,
+                error=llm_response.error,
+                processing_time_ms=processing_time,
+                citations=citations,
+            )
+
+        except Exception:
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+
+            logger.exception("rag_query_failed", query=query[:100])
+
+            return RAGResult(
+                answer="",
+                sources=[],
+                query=query,
+                tokens_used=0,
+                success=False,
+                error="Internal error",
+                processing_time_ms=processing_time,
+            )
+
+    def _check_input_guardrails(
+        self,
+        query: str,
+        guardrail_context: Optional[Dict[str, Any]],
+        start_time: datetime,
+    ) -> Tuple[GuardrailResult, Optional[RAGResult]]:
+        """Run input guardrails; returns the result plus a blocked response if refused."""
+        guardrail_result = self.guardrails.check_input(query, guardrail_context)
+        from app.core.guardrail_diagnostics import log_guardrail_decision
+
+        log_guardrail_decision(
+            guardrail_result, surface="input", route="rag.execute_query"
+        )
+
+        if guardrail_result.action == GuardrailAction.BLOCK:
+            processing_time = (
+                datetime.now() - start_time
+            ).total_seconds() * 1000
+
+            logger.warning(
+                "rag_query_blocked",
+                reason=guardrail_result.reason,
+                query=query[:50],
+            )
+
+            triggered = guardrail_result.triggered_rules or []
+            rule_id = (
+                triggered[0]
+                if triggered
+                else (guardrail_result.reason or "guarded")
+            )
+            return guardrail_result, RAGResult(
+                answer=guardrail_result.message
+                or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
+                sources=[],
+                query=query,
+                tokens_used=0,
+                success=True,
+                error=None,
+                processing_time_ms=processing_time,
+                outcome="guarded",
+                reason=rule_id,
+            )
+        return guardrail_result, None
+
+    def _rewrite_search_query(
+        self, safe_query: str, chat_history: Optional[List[ChatMessage]]
+    ) -> str:
+        """Enrich short follow-up queries with recent chat history context."""
+        # Query rewriting: enrich short follow-up queries with chat history context
+        search_query = safe_query
+        if chat_history and len(safe_query.split()) <= 6:
+            last_assistant = None
+            for msg in reversed(chat_history):
+                if msg.role == "assistant":
+                    last_assistant = msg.content
+                    break
+            if last_assistant:
+                topic_hint = last_assistant[:200]
+                search_query = (
+                    f"{safe_query} (konteks sebelumnya: {topic_hint})"
+                )
+                logger.info(
+                    "rag_query_rewritten",
+                    original=safe_query[:80],
+                    rewritten=search_query[:120],
+                )
+        return search_query
+
+    async def _answer_no_fetch(
+        self,
+        query: str,
+        safe_query: str,
+        chat_history: Optional[List[ChatMessage]],
+        start_time: datetime,
+    ) -> RAGResult:
+        """Answer directly without retrieval when the policy decides NO_FETCH."""
+        logger.info(
+            "rag_policy_no_fetch",
+            query=safe_query[:100],
+            reason="policy_optimization",
+        )
+
+        no_fetch_prompt = query
+        if chat_history:
+            history_lines = [
+                f"{'Mahasiswa' if m.role == 'user' else 'Asisten'}: {m.content}"
+                for m in chat_history[-5:]
+            ]
+            history_text = "\n".join(history_lines)
+            no_fetch_prompt = f"Riwayat percakapan:\n{history_text}\n\nPertanyaan terbaru mahasiswa: {query}"
+
+        llm_response = await self.llm_service.generate(
+            prompt=no_fetch_prompt,
+            system_prompt=SYSTEM_PERSONAL_CHAT,
+            temperature=TEMPERATURE["personal_chat"],
+            chat_history=chat_history,
+        )
+
+        processing_time = (
+            datetime.now() - start_time
+        ).total_seconds() * 1000
+
+        return RAGResult(
+            answer=llm_response.content,
+            sources=[],
+            query=query,
+            tokens_used=llm_response.tokens_used,
+            success=llm_response.success,
+            error=llm_response.error,
+            processing_time_ms=processing_time,
+        )
+
+    async def _retrieve_contexts(
+        self,
+        query: str,
+        safe_query: str,
+        search_query: str,
+        collection_name: Optional[str],
+        n_results: int,
+        effective_filter: Optional[Dict[str, Any]],
+        score_threshold: Optional[float],
+        session_week_index: Optional[int],
+        chat_history: Optional[List[ChatMessage]],
+        start_time: datetime,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Optional[RAGResult]]:
+        """Search the vector store with semantic-cache reuse, quality plan and rerank.
+
+        Returns contexts, search results, and an early response when no results exist.
+        """
+        from app.services.week_rag import rank_week_boosted_results
+
+        # [OPTIMIZATION] Check if we can reuse previous context
+        if await self._is_semantically_identical(search_query):
+            logger.info("rag_semantic_cache_hit", query=query[:50])
+            contexts = self._last_contexts
+            search_results = []  # Placeholder since we have contexts
+        else:
+            from app.services.rag_retrieval_plan import build_retrieval_plan
+
+            plan = build_retrieval_plan(
+                query=search_query,
+                query_type=None,
+                quality_controls=self.quality_controls,
+                requested_n_results=n_results,
+                requested_score_threshold=score_threshold,
+            )
+
+            search_results = await self.vector_store.search(
+                query=safe_query,
+                collection_name=collection_name,
+                n_results=plan.top_k,
+                where=effective_filter,
+                score_threshold=plan.score_threshold,
+            )
+            search_results = rank_week_boosted_results(
+                search_results, session_week_index
+            )
+
+            if not search_results:
+                logger.warning("rag_no_results", query=query[:100])
+
+                llm_response = await self.llm_service.generate(
+                    prompt=query,
+                    system_prompt=SYSTEM_RAG_NO_CONTEXT,
+                    temperature=TEMPERATURE["rag_no_context"],
+                    chat_history=chat_history,
+                )
+
+                processing_time = (
+                    datetime.now() - start_time
+                ).total_seconds() * 1000
+
+                return [], [], RAGResult(
+                    answer=llm_response.content,
+                    sources=[],
+                    query=query,
+                    tokens_used=llm_response.tokens_used,
+                    success=llm_response.success,
+                    error=llm_response.error,
+                    processing_time_ms=processing_time,
+                )
+
+            if plan.use_reranker and self.reranker and self.reranker.enabled:
+                try:
+                    reranked_results = await self.reranker.rerank(
+                        query=query,
+                        documents=search_results,
+                        top_k=plan.rerank_top_n,
+                    )
+                    if reranked_results:
+                        search_results = reranked_results
+                except Exception:
+                    logger.exception("rag_rerank_fallback")
+
+            search_results = search_results[
+                : (n_results or self.quality_controls.top_k_results)
+            ]
+
+            # Step 2: Format contexts & Update semantic cache
+            contexts = self._format_search_results(search_results)
+            self._last_query = query
+            self._last_query_embedding = (
+                None  # PERF-AI-06: Invalidate cached embedding
+            )
+            self._last_contexts = contexts
+
+        return contexts, search_results, None
+
+    async def _synthesize_answer(
+        self,
+        query: str,
+        contexts: List[Dict[str, Any]],
+        chat_history: Optional[List[ChatMessage]],
+        fading_level: float,
+        guardrail_context: Optional[Dict[str, Any]],
+    ) -> Any:
+        """Build the scaffolding prompt context and generate the RAG answer."""
+        scaffolding_ctx = None
+        if guardrail_context and guardrail_context.get("scaffolding_config"):
+            sc = guardrail_context["scaffolding_config"]
+            if sc.get("enabled", True):
+                level = sc.get("scaffolding_level") or "auto"
+                style = ""
+                if level == "early":
+                    style = SCAFFOLDING_EARLY_STYLE
+                elif level == "late":
+                    style = SCAFFOLDING_LATE_STYLE
+                scaffolding_ctx = (
+                    f"Scaffolding level for this cohort: {level}. {style}"
+                )
+        llm_response = await self.llm_service.generate_rag_response(
+            query=query,
+            contexts=contexts,
+            chat_history=chat_history,
+            fading_level=fading_level,
+            context=scaffolding_ctx,
+        )
+        return llm_response
+
+    async def _verify_grounding(
+        self,
+        llm_response: Any,
+        query: str,
+        contexts: List[Dict[str, Any]],
+        search_results: List[Dict[str, Any]],
+        start_time: datetime,
+    ) -> Optional[RAGResult]:
+        """Grounding verification (TA Algorithm 1 OutputGuardrails)."""
+        from app.services.grounding_verifier import get_grounding_verifier
+
+        grounding_verifier = get_grounding_verifier()
+        grounding_result = await grounding_verifier.verify_grounding_async(
+            response=llm_response.content,
+            documents=[
+                {"content": c.get("text", c.get("content", ""))}
+                for c in contexts
+            ],
+            threshold=self._grounding_threshold,
+        )
+
+        if not grounding_result.is_grounded:
+            logger.warning(
+                "grounding_check_failed",
+                ratio=grounding_result.grounding_ratio,
+                ungrounded=grounding_result.ungrounded_claims[:2],
+            )
+            return RAGResult(
+                answer="Jawaban tidak dapat diberikan tanpa berspekulasi di luar materi yang tersedia.",
+                sources=self._extract_sources(search_results)
+                if search_results
+                else [],
+                query=query,
+                tokens_used=llm_response.tokens_used,
+                success=True,
+                scaffolding_triggered=True,
+                processing_time_ms=(datetime.now() - start_time).total_seconds()
+                * 1000,
+            )
+        return None
+
+    async def _apply_output_guardrails(
+        self,
+        llm_response: Any,
+        query: str,
+        contexts: List[Dict[str, Any]],
+        guardrail_context: Optional[Dict[str, Any]],
+        start_time: datetime,
+    ) -> Tuple[bool, Optional[RAGResult]]:
+        """Run output guardrails; returns (scaffolding_triggered, blocked response)."""
+        from app.core.guardrail_diagnostics import log_guardrail_decision
+
+        output_check = self.guardrails.check_output(
+            response=llm_response.content,
+            original_query=query,
+            contexts=contexts,
+            context=guardrail_context,
+        )
+        log_guardrail_decision(
+            output_check, surface="output", route="rag.execute_query"
+        )
+
+        scaffolding_triggered = False
+        if output_check.action == GuardrailAction.BLOCK:
+            triggered = output_check.triggered_rules or []
+            rule_id = (
+                triggered[0]
+                if triggered
+                else (output_check.reason or "guarded")
+            )
+            return True, RAGResult(
+                answer=output_check.message
+                or "Maaf, respons dibatasi oleh kebijakan AI course ini.",
+                sources=[],
+                query=query,
+                tokens_used=llm_response.tokens_used,
+                success=True,
+                scaffolding_triggered=True,
+                processing_time_ms=(datetime.now() - start_time).total_seconds()
+                * 1000,
+                outcome="guarded",
+                reason=rule_id,
+            )
+        if output_check.action == GuardrailAction.REDIRECT:
+            # Reframe to Socratic
+            reframed = await self.llm_service.reframe_to_socratic(
+                llm_response.content
+            )
+            llm_response.content = reframed
+            scaffolding_triggered = True
+        elif output_check.action == GuardrailAction.SANITIZE:
+            llm_response.content = (
+                output_check.sanitized_input or llm_response.content or ""
+            )
+        return scaffolding_triggered, None
+
+    def _extract_sources_and_citations(
+        self, search_results: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Extract source information and week citations from search results."""
+        from app.services.week_rag import sources_to_citations
+
+        sources = self._extract_sources(search_results)
+        citations = sources_to_citations(search_results)
+        logger.info(
+            "rag_citations_extracted",
+            num_citations=len(citations),
+            has_citations=len(citations) > 0,
+        )
+        return sources, citations
+
+    def _build_effective_filter(
+        self,
+        filter_metadata: Optional[Dict[str, Any]],
+        max_week_index: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        """Merge the course-week metadata cap into the requested search filter."""
+        from app.services.week_rag import week_metadata_filter
 
         effective_filter = filter_metadata
         week_cap = week_metadata_filter(max_week_index)
         if week_cap:
             effective_filter = {**(filter_metadata or {}), **week_cap}
+        return effective_filter
 
-        # Build context for caching
-        cache_context = {
+    def _build_cache_context(
+        self,
+        collection_name: Optional[str],
+        n_results: int,
+        effective_filter: Optional[Dict[str, Any]],
+        score_threshold: Optional[float],
+        chat_history: Optional[List[ChatMessage]],
+    ) -> Dict[str, Any]:
+        """Build context for caching."""
+        return {
             "collection_name": collection_name,
             "n_results": n_results,
             "filter_metadata": effective_filter,
@@ -323,336 +844,13 @@ class RAGPipeline:
             "history_length": len(chat_history) if chat_history else 0,
         }
 
-        # Define the query execution function
-        async def execute_rag_query():
-            try:
-                guardrail_result = self.guardrails.check_input(query, guardrail_context)
-                from app.core.guardrail_diagnostics import log_guardrail_decision
-
-                log_guardrail_decision(
-                    guardrail_result, surface="input", route="rag.execute_query"
-                )
-
-                if guardrail_result.action == GuardrailAction.BLOCK:
-                    processing_time = (
-                        datetime.now() - start_time
-                    ).total_seconds() * 1000
-
-                    logger.warning(
-                        "rag_query_blocked",
-                        reason=guardrail_result.reason,
-                        query=query[:50],
-                    )
-
-                    triggered = guardrail_result.triggered_rules or []
-                    rule_id = (
-                        triggered[0]
-                        if triggered
-                        else (guardrail_result.reason or "guarded")
-                    )
-                    return RAGResult(
-                        answer=guardrail_result.message
-                        or "Maaf, saya tidak bisa membantu dengan permintaan tersebut.",
-                        sources=[],
-                        query=query,
-                        tokens_used=0,
-                        success=True,
-                        error=None,
-                        processing_time_ms=processing_time,
-                        outcome="guarded",
-                        reason=rule_id,
-                    )
-
-                # Use sanitized input if available
-                safe_query = guardrail_result.sanitized_input or query
-
-                # Query rewriting: enrich short follow-up queries with chat history context
-                search_query = safe_query
-                if chat_history and len(safe_query.split()) <= 6:
-                    last_assistant = None
-                    for msg in reversed(chat_history):
-                        if msg.role == "assistant":
-                            last_assistant = msg.content
-                            break
-                    if last_assistant:
-                        topic_hint = last_assistant[:200]
-                        search_query = (
-                            f"{safe_query} (konteks sebelumnya: {topic_hint})"
-                        )
-                        logger.info(
-                            "rag_query_rewritten",
-                            original=safe_query[:80],
-                            rewritten=search_query[:120],
-                        )
-
-                # Step 1: Policy decision - FETCH or NO_FETCH
-                should_fetch = self._should_retrieve(search_query, self._last_contexts)
-                action_taken = "FETCH" if should_fetch else "NO_FETCH"
-
-                if not should_fetch:
-                    logger.info(
-                        "rag_policy_no_fetch",
-                        query=safe_query[:100],
-                        reason="policy_optimization",
-                    )
-
-                    no_fetch_prompt = query
-                    if chat_history:
-                        history_lines = [
-                            f"{'Mahasiswa' if m.role == 'user' else 'Asisten'}: {m.content}"
-                            for m in chat_history[-5:]
-                        ]
-                        history_text = "\n".join(history_lines)
-                        no_fetch_prompt = f"Riwayat percakapan:\n{history_text}\n\nPertanyaan terbaru mahasiswa: {query}"
-
-                    llm_response = await self.llm_service.generate(
-                        prompt=no_fetch_prompt,
-                        system_prompt=SYSTEM_PERSONAL_CHAT,
-                        temperature=TEMPERATURE["personal_chat"],
-                        chat_history=chat_history,
-                    )
-
-                    processing_time = (
-                        datetime.now() - start_time
-                    ).total_seconds() * 1000
-
-                    return RAGResult(
-                        answer=llm_response.content,
-                        sources=[],
-                        query=query,
-                        tokens_used=llm_response.tokens_used,
-                        success=llm_response.success,
-                        error=llm_response.error,
-                        processing_time_ms=processing_time,
-                    )
-
-                # Step 1: FETCH - Search vector store (with semantic cache optimization)
-                logger.info(
-                    "rag_search_started",
-                    query=query[:100],
-                    collection=collection_name,
-                    action=action_taken,
-                )
-
-                # [OPTIMIZATION] Check if we can reuse previous context
-                if await self._is_semantically_identical(search_query):
-                    logger.info("rag_semantic_cache_hit", query=query[:50])
-                    contexts = self._last_contexts
-                    search_results = []  # Placeholder since we have contexts
-                else:
-                    from app.services.rag_retrieval_plan import build_retrieval_plan
-
-                    plan = build_retrieval_plan(
-                        query=search_query,
-                        query_type=None,
-                        quality_controls=self.quality_controls,
-                        requested_n_results=n_results,
-                        requested_score_threshold=score_threshold,
-                    )
-
-                    search_results = await self.vector_store.search(
-                        query=safe_query,
-                        collection_name=collection_name,
-                        n_results=plan.top_k,
-                        where=effective_filter,
-                        score_threshold=plan.score_threshold,
-                    )
-                    search_results = rank_week_boosted_results(
-                        search_results, session_week_index
-                    )
-
-                    if not search_results:
-                        logger.warning("rag_no_results", query=query[:100])
-
-                        llm_response = await self.llm_service.generate(
-                            prompt=query,
-                            system_prompt=SYSTEM_RAG_NO_CONTEXT,
-                            temperature=TEMPERATURE["rag_no_context"],
-                            chat_history=chat_history,
-                        )
-
-                        processing_time = (
-                            datetime.now() - start_time
-                        ).total_seconds() * 1000
-
-                        return RAGResult(
-                            answer=llm_response.content,
-                            sources=[],
-                            query=query,
-                            tokens_used=llm_response.tokens_used,
-                            success=llm_response.success,
-                            error=llm_response.error,
-                            processing_time_ms=processing_time,
-                        )
-
-                    if plan.use_reranker and self.reranker and self.reranker.enabled:
-                        try:
-                            reranked_results = await self.reranker.rerank(
-                                query=query,
-                                documents=search_results,
-                                top_k=plan.rerank_top_n,
-                            )
-                            if reranked_results:
-                                search_results = reranked_results
-                        except Exception:
-                            logger.exception("rag_rerank_fallback")
-
-                    search_results = search_results[
-                        : (n_results or self.quality_controls.top_k_results)
-                    ]
-
-                    # Step 2: Format contexts & Update semantic cache
-                    contexts = self._format_search_results(search_results)
-                    self._last_query = query
-                    self._last_query_embedding = (
-                        None  # PERF-AI-06: Invalidate cached embedding
-                    )
-                    self._last_contexts = contexts
-
-                # Step 3: Generate response with RAG
-                scaffolding_ctx = None
-                if guardrail_context and guardrail_context.get("scaffolding_config"):
-                    sc = guardrail_context["scaffolding_config"]
-                    if sc.get("enabled", True):
-                        level = sc.get("scaffolding_level") or "auto"
-                        style = ""
-                        if level == "early":
-                            style = SCAFFOLDING_EARLY_STYLE
-                        elif level == "late":
-                            style = SCAFFOLDING_LATE_STYLE
-                        scaffolding_ctx = (
-                            f"Scaffolding level for this cohort: {level}. {style}"
-                        )
-                llm_response = await self.llm_service.generate_rag_response(
-                    query=query,
-                    contexts=contexts,
-                    chat_history=chat_history,
-                    fading_level=fading_level,
-                    context=scaffolding_ctx,
-                )
-
-                # Step 3.5: Grounding Verification (TA Algorithm 1 OutputGuardrails)
-                from app.services.grounding_verifier import get_grounding_verifier
-
-                grounding_verifier = get_grounding_verifier()
-                grounding_result = await grounding_verifier.verify_grounding_async(
-                    response=llm_response.content,
-                    documents=[
-                        {"content": c.get("text", c.get("content", ""))}
-                        for c in contexts
-                    ],
-                    threshold=self._grounding_threshold,
-                )
-
-                if not grounding_result.is_grounded:
-                    logger.warning(
-                        "grounding_check_failed",
-                        ratio=grounding_result.grounding_ratio,
-                        ungrounded=grounding_result.ungrounded_claims[:2],
-                    )
-                    return RAGResult(
-                        answer="Jawaban tidak dapat diberikan tanpa berspekulasi di luar materi yang tersedia.",
-                        sources=self._extract_sources(search_results)
-                        if search_results
-                        else [],
-                        query=query,
-                        tokens_used=llm_response.tokens_used,
-                        success=True,
-                        scaffolding_triggered=True,
-                        processing_time_ms=(datetime.now() - start_time).total_seconds()
-                        * 1000,
-                    )
-
-                # Step 4: Output Guardrails (Pedagogy)
-                output_check = self.guardrails.check_output(
-                    response=llm_response.content,
-                    original_query=query,
-                    contexts=contexts,
-                    context=guardrail_context,
-                )
-                log_guardrail_decision(
-                    output_check, surface="output", route="rag.execute_query"
-                )
-
-                scaffolding_triggered = False
-                if output_check.action == GuardrailAction.BLOCK:
-                    triggered = output_check.triggered_rules or []
-                    rule_id = (
-                        triggered[0]
-                        if triggered
-                        else (output_check.reason or "guarded")
-                    )
-                    return RAGResult(
-                        answer=output_check.message
-                        or "Maaf, respons dibatasi oleh kebijakan AI course ini.",
-                        sources=[],
-                        query=query,
-                        tokens_used=llm_response.tokens_used,
-                        success=True,
-                        scaffolding_triggered=True,
-                        processing_time_ms=(datetime.now() - start_time).total_seconds()
-                        * 1000,
-                        outcome="guarded",
-                        reason=rule_id,
-                    )
-                elif output_check.action == GuardrailAction.REDIRECT:
-                    # Reframe to Socratic
-                    reframed = await self.llm_service.reframe_to_socratic(
-                        llm_response.content
-                    )
-                    llm_response.content = reframed
-                    scaffolding_triggered = True
-                elif output_check.action == GuardrailAction.SANITIZE:
-                    llm_response.content = (
-                        output_check.sanitized_input or llm_response.content or ""
-                    )
-
-                # Step 5: Extract sources
-                sources = self._extract_sources(search_results)
-                citations = sources_to_citations(search_results)
-                logger.info(
-                    "rag_citations_extracted",
-                    num_citations=len(citations),
-                    has_citations=len(citations) > 0,
-                )
-
-                processing_time = (datetime.now() - start_time).total_seconds() * 1000
-
-                logger.info(
-                    "rag_query_complete",
-                    query=query[:100],
-                    num_sources=len(sources),
-                    processing_time_ms=processing_time,
-                )
-
-                return RAGResult(
-                    answer=llm_response.content,
-                    sources=sources,
-                    query=query,
-                    tokens_used=llm_response.tokens_used,
-                    success=llm_response.success,
-                    scaffolding_triggered=scaffolding_triggered,
-                    error=llm_response.error,
-                    processing_time_ms=processing_time,
-                    citations=citations,
-                )
-
-            except Exception:
-                processing_time = (datetime.now() - start_time).total_seconds() * 1000
-
-                logger.exception("rag_query_failed", query=query[:100])
-
-                return RAGResult(
-                    answer="",
-                    sources=[],
-                    query=query,
-                    tokens_used=0,
-                    success=False,
-                    error="Internal error",
-                    processing_time_ms=processing_time,
-                )
-
-        # Use Efficiency Guard if enabled
+    async def _run_with_cache(
+        self,
+        query: str,
+        cache_context: Dict[str, Any],
+        execute_rag_query: Callable[[], Awaitable[RAGResult]],
+    ) -> RAGResult:
+        """Execute the query through the efficiency-guard cache when enabled."""
         if self.efficiency_guard:
             result_dict = await self.efficiency_guard.execute_with_caching(
                 query=query,
@@ -666,9 +864,8 @@ class RAGPipeline:
             if isinstance(result_dict, dict):
                 return RAGResult(**result_dict)
             return result_dict
-        else:
-            # Execute without caching
-            return await execute_rag_query()
+        # Execute without caching
+        return await execute_rag_query()
 
     async def query_stream(
         self,

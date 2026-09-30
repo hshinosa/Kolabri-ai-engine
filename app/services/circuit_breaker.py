@@ -8,7 +8,7 @@ Reference: https://martinfowler.com/bliki/CircuitBreaker.html
 """
 
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Callable, Any, Dict
 import asyncio
 

@@ -16,15 +16,15 @@ Issue: KOL-42 - High Performance Targets
 
 import asyncio
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
+# Test patch anchor: tests patch module attribute get_llm_service (never called in-module).
+from app.services.llm import get_llm_service  # noqa: F401
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.redis_cache import get_redis_cache, CACHE_TTL
-from app.services.llm import get_llm_service
+from app.core.redis_cache import get_redis_cache
 from app.services.rag import get_rag_pipeline
 
 logger = get_logger(__name__)
@@ -339,9 +339,7 @@ async def ask_batch_precomputed(request_list: BatchAskRequestList):
     # value per key (Nones on miss/error), so lengths are equal by contract;
     # strict=True turns any future drift into a loud error instead of silently
     # dropping trailing requests from the response.
-    for i, (request, cached) in enumerate(
-        zip(request_list.requests, cached_values, strict=True)
-    ):
+    for request, cached in zip(request_list.requests, cached_values, strict=True):
         if cached:
             responses.append(
                 BatchAskResponse(

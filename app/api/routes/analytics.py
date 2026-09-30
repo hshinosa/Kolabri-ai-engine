@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Path, Query
 from fastapi.responses import JSONResponse, Response
 
 from app.core.config import settings
@@ -16,6 +16,7 @@ from app.api.schemas import (
     EngagementAnalysisRequest,
     EngagementAnalysisResponse,
     GroupAnalyticsResponse,
+    ProcessMiningExportResponse,
 )
 from app.services.export_service import get_export_service
 from app.services.mongodb_logger import get_mongo_logger
@@ -302,6 +303,7 @@ async def get_group_analytics_alias(
 
 @router.get(
     "/analytics/export",
+    response_model=ProcessMiningExportResponse,
     tags=["Analytics"],
     summary="Export process mining data (general)",
 )

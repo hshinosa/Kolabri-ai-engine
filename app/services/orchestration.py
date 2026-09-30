@@ -17,14 +17,11 @@ from app.services.rag import get_rag_pipeline
 from app.services.nlp_analytics import (
     get_engagement_analyzer,
     EngagementAnalysis,
-    EngagementType,
 )
 from app.services.intervention import get_intervention_service
 from app.services.mongodb_logger import get_mongo_logger
 from app.services.srl_classifier_enhanced import (
     get_enhanced_srl_classifier,
-    EnhancedSRLClassificationResult,
-    SRLPhase,
 )
 from app.services.goal_validator import get_goal_validator
 from app.services.logic_listener import get_logic_listener

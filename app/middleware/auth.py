@@ -6,8 +6,7 @@ KOL-142: Enforce Authentication for AI Engine API Routes
 Provides API key authentication for sensitive endpoints.
 """
 
-from fastapi import Request, HTTPException, Depends
-from typing import Optional
+from fastapi import Request, HTTPException
 import hmac
 from app.core.config import settings
 from app.core.logging import get_logger

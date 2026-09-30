@@ -6,14 +6,12 @@ Supports XES conversion for analytical tools like ProM and Disco.
 """
 
 import csv
-import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.utils.sensitive_data import sanitize_sensitive_data
 

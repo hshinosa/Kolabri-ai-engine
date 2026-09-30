@@ -386,23 +386,21 @@ class EngagementAnalyzer:
         """Calculate confidence in the analysis."""
         if word_count <= 5: # <= instead of <
             return 0.3
-        elif word_count <= 15:
+        if word_count <= 15:
             return 0.5
-        elif word_count <= 50:
+        if word_count <= 50:
             return 0.7
-        else:
-            return 0.9
+        return 0.9
     
     def _get_quality_recommendation(self, score: float) -> str:
         """Get recommendation based on quality score."""
         if score >= 70:
             return "Diskusi berkualitas tinggi - pertahankan!"
-        elif score >= 50:
+        if score >= 50:
             return "Diskusi cukup baik - coba ajukan pertanyaan 'mengapa' untuk tingkatkan"
-        elif score >= 30:
+        if score >= 30:
             return "Diskusi perlu ditingkatkan - dorong analisis dan evaluasi"
-        else:
-            return "Diskusi dangkal - intervensi diperlukan untuk pemikiran kritis"
+        return "Diskusi dangkal - intervensi diperlukan untuk pemikiran kritis"
     
     def _to_dict(self, analysis: EngagementAnalysis) -> Dict[str, Any]:
         """Convert EngagementAnalysis to dictionary."""

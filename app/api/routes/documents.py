@@ -21,7 +21,11 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
-from app.api.schemas import BatchUploadResponse, IngestResponse
+from app.api.schemas import (
+    BatchUploadResponse,
+    DocumentDeleteResponse,
+    IngestResponse,
+)
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.document_processor import get_document_processor
@@ -349,6 +353,7 @@ async def ingest_batch(
 
 @router.delete(
     "/documents/{document_id}",
+    response_model=DocumentDeleteResponse,
     tags=["Documents"],
     summary="Delete a document from the vector store",
 )

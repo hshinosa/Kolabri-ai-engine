@@ -15,18 +15,15 @@ Optimized for:
 """
 
 import os
-import io
-import re
 import zipfile
 import tempfile
 import asyncio
 import gc
 import shutil
-import logging
 import importlib.util
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -44,7 +41,8 @@ from docx import Document as DocxDocument
 from pptx import Presentation
 
 # Image Processing
-import numpy as np
+# Test patch anchor: tests patch module attribute np (never called in-module).
+import numpy as np  # noqa: F401
 from PIL import Image
 
 # OCR (optional - graceful fallback if not available)
@@ -335,118 +333,18 @@ class DocumentProcessor:
             )
 
         try:
-            # Process based on file type
-            if file_type == "pdf":
-                result = await self._process_pdf(
-                    file_content, filename, document_id, metadata, file_path=file_path
-                )
-            elif file_type == "docx":
-                # DOCX/PPTX/text still need bytes; only load if not already provided
-                content_for_processing = (
-                    file_content
-                    if file_content is not None
-                    else await asyncio.to_thread(self._read_file_bytes, file_path)
-                )
-                result = await self._process_docx(
-                    content_for_processing, filename, document_id, metadata
-                )
-                if file_content is None:
-                    del content_for_processing
-                    gc.collect()
-            elif file_type == "pptx":
-                content_for_processing = (
-                    file_content
-                    if file_content is not None
-                    else await asyncio.to_thread(self._read_file_bytes, file_path)
-                )
-                result = await self._process_pptx(
-                    content_for_processing, filename, document_id, metadata
-                )
-                if file_content is None:
-                    del content_for_processing
-                    gc.collect()
-            elif file_type in ("text", "markdown"):
-                content_for_processing = (
-                    file_content
-                    if file_content is not None
-                    else await asyncio.to_thread(self._read_file_bytes, file_path)
-                )
-                result = await self._process_text(
-                    content_for_processing, filename, document_id, file_type, metadata
-                )
-                if file_content is None:
-                    del content_for_processing
-                    gc.collect()
-            elif file_type == "zip":
-                # ZIP processing returns multiple documents
-                content_for_processing = (
-                    file_content
-                    if file_content is not None
-                    else await asyncio.to_thread(self._read_file_bytes, file_path)
-                )
-                batch_result = await self.process_zip(
-                    content_for_processing,
-                    document_id,
-                    collection_name,
-                    course_id,
-                    metadata,
-                )
-                if file_content is None:
-                    del content_for_processing
-                    gc.collect()
-                # Aggregate results
-                return ProcessedDocument(
-                    filename=filename,
-                    file_type="zip",
-                    chunks=[],  # Return empty list, they are already stored
-                    page_count=batch_result.total_files,
-                    image_count=0,
-                    total_characters=sum(
-                        doc.total_characters for doc in batch_result.documents
-                    ),
-                    processing_time_ms=batch_result.processing_time_ms,
-                    success=batch_result.successful_files > 0,
-                    error=None
-                    if batch_result.successful_files > 0
-                    else "No files processed successfully",
-                )
-            elif file_type == "image":
-                content_for_processing = (
-                    file_content
-                    if file_content is not None
-                    else await asyncio.to_thread(self._read_file_bytes, file_path)
-                )
-                result = await self._process_image(
-                    content_for_processing, filename, document_id, metadata
-                )
-                if file_content is None:
-                    del content_for_processing
-                    gc.collect()
-            else:
-                raise ValueError(f"Handler not implemented for type: {file_type}")
-
-            # Store chunks in vector store
-            if result.chunks:
-                await self._store_chunks(result.chunks, collection_name)
-
-            # Mark as processed for idempotency
-            self._mark_processed(content_hash, collection_name, document_id)
-
-            processing_time = (datetime.now() - start_time).total_seconds() * 1000
-            result.processing_time_ms = processing_time
-
-            logger.info(
-                "document_processed",
-                filename=filename,
+            return await self._process_resolved_file(
                 file_type=file_type,
-                chunks=len(result.chunks),
-                pages=result.page_count,
-                images=result.image_count,
-                processing_time_ms=processing_time,
-                content_hash=content_hash[:16],
+                file_content=file_content,
+                filename=filename,
+                document_id=document_id,
+                collection_name=collection_name,
+                course_id=course_id,
+                metadata=metadata,
+                file_path=file_path,
+                content_hash=content_hash,
+                start_time=start_time,
             )
-
-            return result
 
         except Exception:
             processing_time = (datetime.now() - start_time).total_seconds() * 1000
@@ -463,6 +361,137 @@ class DocumentProcessor:
                 success=False,
                 error="Internal error",
             )
+
+    async def _process_resolved_file(
+        self,
+        file_type: str,
+        file_content: Optional[bytes],
+        filename: str,
+        document_id: str,
+        collection_name: str,
+        course_id: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+        file_path: Optional[str],
+        content_hash: str,
+        start_time: datetime,
+    ) -> ProcessedDocument:
+        """Dispatch a validated file by type, store its chunks, mark idempotency.
+
+        Runs inside process_file's error boundary: any exception propagates to
+        its handler, which logs and returns a failed ProcessedDocument.
+        """
+        # Process based on file type
+        if file_type == "pdf":
+            result = await self._process_pdf(
+                file_content, filename, document_id, metadata, file_path=file_path
+            )
+        elif file_type == "docx":
+            # DOCX/PPTX/text still need bytes; only load if not already provided
+            content_for_processing = (
+                file_content
+                if file_content is not None
+                else await asyncio.to_thread(self._read_file_bytes, file_path)
+            )
+            result = await self._process_docx(
+                content_for_processing, filename, document_id, metadata
+            )
+            if file_content is None:
+                del content_for_processing
+                gc.collect()
+        elif file_type == "pptx":
+            content_for_processing = (
+                file_content
+                if file_content is not None
+                else await asyncio.to_thread(self._read_file_bytes, file_path)
+            )
+            result = await self._process_pptx(
+                content_for_processing, filename, document_id, metadata
+            )
+            if file_content is None:
+                del content_for_processing
+                gc.collect()
+        elif file_type in ("text", "markdown"):
+            content_for_processing = (
+                file_content
+                if file_content is not None
+                else await asyncio.to_thread(self._read_file_bytes, file_path)
+            )
+            result = await self._process_text(
+                content_for_processing, filename, document_id, file_type, metadata
+            )
+            if file_content is None:
+                del content_for_processing
+                gc.collect()
+        elif file_type == "zip":
+            # ZIP processing returns multiple documents
+            content_for_processing = (
+                file_content
+                if file_content is not None
+                else await asyncio.to_thread(self._read_file_bytes, file_path)
+            )
+            batch_result = await self.process_zip(
+                content_for_processing,
+                document_id,
+                collection_name,
+                course_id,
+                metadata,
+            )
+            if file_content is None:
+                del content_for_processing
+                gc.collect()
+            # Aggregate results
+            return ProcessedDocument(
+                filename=filename,
+                file_type="zip",
+                chunks=[],  # Return empty list, they are already stored
+                page_count=batch_result.total_files,
+                image_count=0,
+                total_characters=sum(
+                    doc.total_characters for doc in batch_result.documents
+                ),
+                processing_time_ms=batch_result.processing_time_ms,
+                success=batch_result.successful_files > 0,
+                error=None
+                if batch_result.successful_files > 0
+                else "No files processed successfully",
+            )
+        elif file_type == "image":
+            content_for_processing = (
+                file_content
+                if file_content is not None
+                else await asyncio.to_thread(self._read_file_bytes, file_path)
+            )
+            result = await self._process_image(
+                content_for_processing, filename, document_id, metadata
+            )
+            if file_content is None:
+                del content_for_processing
+                gc.collect()
+        else:
+            raise ValueError(f"Handler not implemented for type: {file_type}")
+
+        # Store chunks in vector store
+        if result.chunks:
+            await self._store_chunks(result.chunks, collection_name)
+
+        # Mark as processed for idempotency
+        self._mark_processed(content_hash, collection_name, document_id)
+
+        processing_time = (datetime.now() - start_time).total_seconds() * 1000
+        result.processing_time_ms = processing_time
+
+        logger.info(
+            "document_processed",
+            filename=filename,
+            file_type=file_type,
+            chunks=len(result.chunks),
+            pages=result.page_count,
+            images=result.image_count,
+            processing_time_ms=processing_time,
+            content_hash=content_hash[:16],
+        )
+
+        return result
 
     @staticmethod
     def _extract_zip_members(zip_path: str, extract_dir: str) -> List[str]:

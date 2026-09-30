@@ -8,11 +8,9 @@ Batch multiple queries jadi 1 LLM call.
 10x cost reduction, 5x throughput improvement.
 """
 
-import asyncio
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.llm import OpenAILLMService as OptimizedLLMService, get_llm_service
 

@@ -8,7 +8,7 @@ import re
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.api.schemas import (
@@ -121,12 +121,11 @@ async def ask_question(request: AskRequest):
                 answer += sources_text
 
             return AskResponse(answer=answer, success=True)
-        else:
-            return AskResponse(
-                answer="Maaf, saya tidak bisa menemukan jawaban untuk pertanyaan tersebut dalam materi kuliah.",
-                success=False,
-                error=result.error,
-            )
+        return AskResponse(
+            answer="Maaf, saya tidak bisa menemukan jawaban untuk pertanyaan tersebut dalam materi kuliah.",
+            success=False,
+            error=result.error,
+        )
 
     except Exception:
         logger.exception("ask_question_failed", query=request.query[:100])

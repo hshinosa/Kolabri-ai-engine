@@ -5,14 +5,13 @@ Compares planned learning goals with actual discussion activities
 to support student reflection and SRL mastery.
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
-from collections import defaultdict, Counter
+from collections import defaultdict
 import statistics
 
 from app.core.logging import get_logger
-from app.core.config import settings
 from app.services.mongodb_logger import MongoDBLogger, get_mongo_logger
 
 logger = get_logger(__name__)
@@ -735,12 +734,11 @@ class PlanVsRealityAnalyzer:
         """Get overall status based on alignment score."""
         if alignment_score >= 80:
             return "excellent"
-        elif alignment_score >= 60:
+        if alignment_score >= 60:
             return "good"
-        elif alignment_score >= 40:
+        if alignment_score >= 40:
             return "moderate"
-        else:
-            return "poor"
+        return "poor"
 
 
 # Singleton instance

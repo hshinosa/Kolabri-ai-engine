@@ -9,7 +9,11 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.schemas import ProviderContextV1
+from app.api.schemas import (
+    GoalRefineResponse,
+    GoalValidateResponse,
+    ProviderContextV1,
+)
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -46,6 +50,7 @@ class GoalValidateBody(BaseModel):
 
 @router.post(
     "/goals/validate",
+    response_model=GoalValidateResponse,
     tags=["Goals"],
     summary="Validate a learning goal against SMART criteria",
 )
@@ -109,6 +114,7 @@ async def validate_goal(request: Request):
 
 @router.post(
     "/goals/refine",
+    response_model=GoalRefineResponse,
     tags=["Goals"],
     summary="Get Socratic questioning hints to improve SMART goal",
 )

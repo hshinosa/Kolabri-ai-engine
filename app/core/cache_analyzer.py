@@ -11,12 +11,10 @@ Features:
 - Cache hit rate monitoring
 """
 
-import asyncio
 from typing import Dict, Any, List
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis_cache import get_redis_cache, CACHE_TTL
 from app.services.llm import OpenAILLMService as OptimizedLLMService

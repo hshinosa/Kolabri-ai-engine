@@ -5,7 +5,6 @@ Fetches available models from AI provider APIs with 1-hour caching.
 Used by admin UI to populate model selection dropdown.
 """
 
-import time
 from typing import Any
 from cachetools import TTLCache
 
@@ -230,9 +229,9 @@ def _get_openai_context_window(model_id: str) -> int:
     """Get context window size for OpenAI model."""
     if "gpt-4o" in model_id or "gpt-4-turbo" in model_id:
         return 128000
-    elif "gpt-4" in model_id:
+    if "gpt-4" in model_id:
         return 8192
-    elif "gpt-3.5-turbo" in model_id:
+    if "gpt-3.5-turbo" in model_id:
         return 16385
     return 4096
 

@@ -2,9 +2,14 @@
 Monitoring & health endpoints.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
+from app.api.schemas import (
+    CircuitBreakerStatusResponse,
+    MonitoringStatusResponse,
+    RerankerStatusResponse,
+)
 from app.core.logging import get_logger
 from app.services.circuit_breaker import get_llm_circuit_breaker
 from app.services.monitoring import get_monitor
@@ -33,7 +38,11 @@ async def metrics():
         raise
 
 
-@router.get("/health/monitoring", tags=["Monitoring"])
+@router.get(
+    "/health/monitoring",
+    response_model=MonitoringStatusResponse,
+    tags=["Monitoring"],
+)
 async def get_monitoring_status():
     """Get monitoring service status and dashboard data."""
     try:
@@ -44,7 +53,11 @@ async def get_monitoring_status():
         raise
 
 
-@router.get("/health/circuit-breakers", tags=["Monitoring"])
+@router.get(
+    "/health/circuit-breakers",
+    response_model=CircuitBreakerStatusResponse,
+    tags=["Monitoring"],
+)
 async def get_circuit_breaker_status():
     """Get status of all circuit breakers."""
     try:
@@ -57,7 +70,11 @@ async def get_circuit_breaker_status():
         raise
 
 
-@router.get("/health/reranker", tags=["Monitoring"])
+@router.get(
+    "/health/reranker",
+    response_model=RerankerStatusResponse,
+    tags=["Monitoring"],
+)
 async def get_reranker_status():
     """Get reranker health and metrics."""
     try:

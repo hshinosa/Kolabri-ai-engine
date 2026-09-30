@@ -9,7 +9,6 @@ from tenacity import (
     retry_if_exception_type,
     retry_if_exception,
 )
-import asyncio
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.utils.sensitive_data import sanitize_error_message
@@ -26,7 +25,6 @@ from app.core.prompt_templates import (
     COT_RAG_WITH_HISTORY,
     COT_INTERVENTION_TEMPLATE,
     COT_SUMMARY_TEMPLATE,
-    COT_GOAL_VALIDATION,
     COT_GOAL_REFINEMENT,
     TEMPERATURE,
 )
