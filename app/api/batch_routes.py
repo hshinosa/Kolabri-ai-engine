@@ -335,7 +335,13 @@ async def ask_batch_precomputed(request_list: BatchAskRequestList):
     successful = 0
     failed = 0
 
-    for i, (request, cached) in enumerate(zip(request_list.requests, cached_values)):
+    # cache_keys is built 1:1 from request_list.requests and mget returns one
+    # value per key (Nones on miss/error), so lengths are equal by contract;
+    # strict=True turns any future drift into a loud error instead of silently
+    # dropping trailing requests from the response.
+    for i, (request, cached) in enumerate(
+        zip(request_list.requests, cached_values, strict=True)
+    ):
         if cached:
             responses.append(
                 BatchAskResponse(

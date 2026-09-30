@@ -4,6 +4,7 @@ Text extraction from PDF, DOCX, PPTX, and plain text files.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
 import gc
@@ -41,6 +42,67 @@ def _chunks_to_processed(chunks: List[ChunkSpec]) -> List[ProcessedChunk]:
     ]
 
 
+# --- Sync cores: called via asyncio.to_thread so blocking fitz/PIL/zip work
+# --- never stalls the event loop during ingest.
+
+
+def _open_pdf(fitz, content: Optional[bytes], file_path: Optional[str]):
+    """Open a PDF from bytes or disk (blocking; run off the event loop)."""
+    if file_path is not None:
+        return fitz.open(filename=file_path)
+    if content is not None:
+        return fitz.open(stream=content, filetype="pdf")
+    raise ValueError("Either content or file_path must be provided for PDF processing")
+
+
+def _decode_pdf_image(pdf_doc, xref, min_width: int, min_height: int):
+    """Extract and decode one embedded image, None if below the size floor.
+
+    Blocking (archive read + PIL decode); run off the event loop.
+    """
+    base_image = pdf_doc.extract_image(xref)
+    pil_img = Image.open(io.BytesIO(base_image["image"]))
+    if pil_img.width < min_width or pil_img.height < min_height:
+        pil_img.close()
+        return None
+    return pil_img
+
+
+def _parse_docx_text(DocxDocument, content: bytes) -> str:
+    """Parse a DOCX into joined paragraph/table text (blocking XML walk)."""
+    doc = DocxDocument(io.BytesIO(content))
+
+    paragraphs = []
+    for para in doc.paragraphs:
+        if para.text.strip():
+            paragraphs.append(para.text.strip())
+
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(
+                cell.text.strip() for cell in row.cells if cell.text.strip()
+            )
+            if row_text:
+                paragraphs.append(row_text)
+
+    return "\n\n".join(paragraphs)
+
+
+def _next_image(iterator) -> Any:
+    """Pull the next decoded image off a blocking extractor iterator."""
+    return next(iterator, None)
+
+
+def _open_pptx(Presentation, content: bytes):
+    """Parse a PPTX from bytes (blocking zip/XML parse; run off the event loop)."""
+    return Presentation(io.BytesIO(content))
+
+
+def _open_pptx_image(shape):
+    """Decode a picture shape's blob into a PIL image (blocking; run off the event loop)."""
+    return Image.open(io.BytesIO(shape.image.blob))
+
+
 async def process_pdf(
     content: Optional[bytes],
     filename: str,
@@ -69,12 +131,7 @@ async def process_pdf(
     all_text = []
     image_count = 0
 
-    if file_path is not None:
-        pdf_doc = fitz.open(filename=file_path)
-    elif content is not None:
-        pdf_doc = fitz.open(stream=content, filetype="pdf")
-    else:
-        raise ValueError("Either content or file_path must be provided for PDF processing")
+    pdf_doc = await asyncio.to_thread(_open_pdf, fitz, content, file_path)
     page_count = len(pdf_doc)
     meta = metadata or {}
     force_ocr = bool(meta.get("perform_ocr"))
@@ -87,7 +144,7 @@ async def process_pdf(
     for page_num, page in enumerate(pdf_doc, start=1):
         page_text_parts = []
 
-        text = page.get_text("text")
+        text = await asyncio.to_thread(page.get_text, "text")
         text_length = len(text.strip()) if text else 0
 
         if text.strip():
@@ -107,17 +164,14 @@ async def process_pdf(
                 pil_img = None
                 try:
                     xref = img[0]
-                    base_image = pdf_doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-
-                    pil_img = Image.open(io.BytesIO(image_bytes))
-                    if (
-                        pil_img.width < min_image_width
-                        or pil_img.height < min_image_height
-                    ):
-                        pil_img.close()
-                        del pil_img, image_bytes, base_image
-                        pil_img = None
+                    pil_img = await asyncio.to_thread(
+                        _decode_pdf_image,
+                        pdf_doc,
+                        xref,
+                        min_image_width,
+                        min_image_height,
+                    )
+                    if pil_img is None:
                         continue
 
                     logger.info(
@@ -146,7 +200,8 @@ async def process_pdf(
         page_text = "\n\n".join(page_text_parts)
         if page_text:
             all_text.append(page_text)
-            specs = _create_chunks(
+            specs = await asyncio.to_thread(
+                _create_chunks,
                 text=page_text,
                 document_id=document_id,
                 filename=filename,
@@ -191,29 +246,19 @@ async def process_docx(
 
     extract_fn = _extract_images_fn or _extract_images_from_docx
 
-    doc = DocxDocument(io.BytesIO(content))
-
-    paragraphs = []
-    for para in doc.paragraphs:
-        if para.text.strip():
-            paragraphs.append(para.text.strip())
-
-    for table in doc.tables:
-        for row in table.rows:
-            row_text = " | ".join(
-                cell.text.strip() for cell in row.cells if cell.text.strip()
-            )
-            if row_text:
-                paragraphs.append(row_text)
-
-    full_text = "\n\n".join(paragraphs)
+    # Blocking XML parse + paragraph/table walk; run off the event loop
+    full_text = await asyncio.to_thread(_parse_docx_text, DocxDocument, content)
 
     image_count = 0
     if ocr_available and ocr_fn:
         try:
             ocr_texts = []
             processed = 0
-            for img in extract_fn(content):
+            images = iter(extract_fn(content))
+            while True:
+                img = await asyncio.to_thread(_next_image, images)
+                if img is None:
+                    break
                 if processed >= 5:
                     img.close()
                     break
@@ -232,7 +277,8 @@ async def process_docx(
         except Exception as e:
             logger.warning("docx_image_extraction_failed", error=str(e))
 
-    specs = _create_chunks(
+    specs = await asyncio.to_thread(
+        _create_chunks,
         text=full_text,
         document_id=document_id,
         filename=filename,
@@ -271,7 +317,7 @@ async def process_pptx(
     if Presentation is None:
         from pptx import Presentation
 
-    prs = Presentation(io.BytesIO(content))
+    prs = await asyncio.to_thread(_open_pptx, Presentation, content)
 
     chunks: List[ProcessedChunk] = []
     total_chars = 0
@@ -295,9 +341,7 @@ async def process_pptx(
             if shape.shape_type == 13 and ocr_available and ocr_fn:
                 img = None
                 try:
-                    image_data = shape.image.blob
-                    img = Image.open(io.BytesIO(image_data))
-                    del image_data
+                    img = await asyncio.to_thread(_open_pptx_image, shape)
                     ocr_text = await ocr_fn(img)
                     if ocr_text:
                         slide_text_parts.append(f"[IMAGE_OCR]: {ocr_text}")
@@ -313,7 +357,8 @@ async def process_pptx(
         slide_text = "\n".join(slide_text_parts)
         if slide_text:
             total_chars += len(slide_text)
-            slide_specs = _create_chunks(
+            slide_specs = await asyncio.to_thread(
+                _create_chunks,
                 text=slide_text,
                 document_id=document_id,
                 filename=filename,
@@ -336,17 +381,15 @@ async def process_pptx(
     )
 
 
-async def process_text(
+def _process_text_sync(
     content: bytes,
     filename: str,
     document_id: str,
     file_type: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    *,
+    metadata: Optional[Dict[str, Any]],
     chunk_size: int,
     chunk_overlap: int,
-):
-
+) -> ProcessedDocument:
     text = None
     for encoding in ["utf-8", "utf-16", "latin-1", "cp1252"]:
         try:
@@ -378,4 +421,27 @@ async def process_text(
         total_characters=len(text),
         processing_time_ms=0,
         success=True,
+    )
+
+
+async def process_text(
+    content: bytes,
+    filename: str,
+    document_id: str,
+    file_type: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+):
+    # Decode + chunk are pure CPU work; run off the event loop
+    return await asyncio.to_thread(
+        _process_text_sync,
+        content,
+        filename,
+        document_id,
+        file_type,
+        metadata,
+        chunk_size,
+        chunk_overlap,
     )

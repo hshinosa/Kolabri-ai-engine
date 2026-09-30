@@ -96,7 +96,8 @@ class Orchestrator:
         try:
             # 1. NLP Analysis
             analytics = self.analyzer.analyze_interaction(message)
-            fading = self._group_fading_levels.get(group_id, 0.0)
+            async with self._state_lock:
+                fading = self._group_fading_levels.get(group_id, 0.0)
 
             # 2. RAG Generation
             scaffolding_config = kwargs.get("scaffolding_config") or {}
@@ -296,7 +297,6 @@ class Orchestrator:
         """
         try:
             analytics = self.analyzer.analyze_interaction(message)
-            fading = self._group_fading_levels.get(group_id, 0.0)
 
             scaffolding_config = kwargs.get("scaffolding_config") or {}
             effective_level = scaffolding_config.get("scaffolding_level") or "auto"
@@ -372,13 +372,11 @@ class Orchestrator:
                 srl_phase = srl_classification.phase.value
                 srl_sub_phase = srl_classification.sub_phase
                 srl_confidence = srl_classification.confidence
-                srl_indicators = srl_classification.indicators
             except Exception as e:
                 logger.warning(f"SRL classification failed: {e}")
                 srl_phase = None
                 srl_sub_phase = None
                 srl_confidence = 0.0
-                srl_indicators = []
 
             scaffolding_outcome = (
                 "applied" if scaffolding_config.get("enabled", True) else "disabled"
@@ -530,8 +528,8 @@ class Orchestrator:
             )
             if det.has_anomalies:
                 anoms.append(self._anomaly_to_dict(det))
-        except:
-            pass
+        except Exception:
+            logger.exception("dashboard_anomaly_check_failed")
 
         metrics = {
             "quality_score": analytics.get("quality_score"),
@@ -857,7 +855,9 @@ class Orchestrator:
     ) -> Optional[str]:
         """Generate intervention message via ChatInterventionService.analyze_and_intervene."""
         # Build messages list from group message history
-        raw_messages = self._group_messages.get(group_id, [])
+        async with self._state_lock:
+            raw_messages = self._group_messages.get(group_id, [])
+            last_intervention_time = self._last_intervention.get(group_id)
         messages = [
             {
                 "role": "user",
@@ -868,7 +868,6 @@ class Orchestrator:
         ]
 
         chat_room_id = kwargs.get("chat_room_id") or group_id
-        last_intervention_time = self._last_intervention.get(group_id)
 
         result = await self.intervention.analyze_and_intervene(
             messages=messages,
@@ -883,7 +882,10 @@ class Orchestrator:
 
     async def get_group_analytics(self, group_id: str) -> Dict[str, Any]:
         """Aggregate in-memory and DB analytics."""
-        msgs = self._group_messages.get(group_id, [])
+        # Copy out under the state lock: handlers append to this list at await
+        # points while the aggregations below iterate over it.
+        async with self._state_lock:
+            msgs = list(self._group_messages.get(group_id, []))
         if not msgs:
             return {"group_id": group_id, "message_count": 0}
 
@@ -900,8 +902,8 @@ class Orchestrator:
                 "score": analysis.comparison.get("alignment_score", 0),
                 "insights": analysis.insights[:3],
             }
-        except:
-            pass
+        except Exception:
+            logger.exception("alignment_analysis_failed")
 
         return {
             "group_id": group_id,
@@ -977,7 +979,8 @@ class Orchestrator:
             repo = ActivityLogRepository(self.mongo_logger.db)
             session_id = await repo.get_latest_session_for_group(group_id)
             return session_id or "1"
-        except:
+        except Exception:
+            logger.exception("session_id_lookup_failed")
             return "1"
 
     async def _calculate_intervention_impact(self, group_id: str) -> Dict[str, Any]:
@@ -992,7 +995,8 @@ class Orchestrator:
                 group_id, last["Timestamp"]
             )
             return {"status": "positive" if resp else "no_response"}
-        except:
+        except Exception:
+            logger.exception("intervention_impact_calculation_failed")
             return {"status": "unknown"}
 
     def check_group_status(

@@ -85,7 +85,7 @@ async def test_provider_endpoint(request: TestProviderRequest) -> TestProviderRe
         return TestProviderResponse(**result)
     except ValueError as e:
         # Validation errors (unsupported provider, invalid config)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Provider test error: {e}", exc_info=True)
         return TestProviderResponse(
@@ -110,7 +110,7 @@ async def get_provider_models(
         return ModelListResponse(**result)
     except ValueError as e:
         # Validation errors (unsupported provider)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Model discovery error for {provider}: {e}", exc_info=True)
         return ModelListResponse(
@@ -147,7 +147,7 @@ async def post_provider_models(
         )
         return ModelListResponse(**result)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Model discovery error for {provider}: {e}", exc_info=True)
         return ModelListResponse(

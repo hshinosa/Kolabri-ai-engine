@@ -44,13 +44,13 @@ async def health_check():
         from app.services.llm import get_llm_service
         from app.core.config import settings
 
-        if settings.UNIFIED_PROVIDER_ENABLED:
-            services["llm"] = True
-            dependencies["llm"] = "healthy"
-        else:
-            llm = get_llm_service()
-            services["llm"] = llm.model is not None
-            dependencies["llm"] = "healthy" if services["llm"] else "down"
+        # Always resolve the service; in unified (lazy) mode force provider
+        # resolution so /health reports reality instead of the flag.
+        llm = get_llm_service()
+        if settings.UNIFIED_PROVIDER_ENABLED and llm.model is None:
+            await llm.ensure_ready()
+        services["llm"] = llm.model is not None
+        dependencies["llm"] = "healthy" if services["llm"] else "down"
     except Exception:
         logger.exception("health_check_llm_failed")
 

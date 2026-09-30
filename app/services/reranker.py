@@ -131,7 +131,11 @@ class CrossEncoderReranker:
             scores = list(await asyncio.to_thread(self.model.rerank, query=query, documents=doc_contents))
 
             scored_docs = []
-            for doc, score in zip(documents, scores):
+            # fastembed's rerank contract returns one score per input
+            # document; strict=True surfaces a contract violation instead of
+            # silently dropping trailing documents (handled by the except
+            # below, which falls back to the original order).
+            for doc, score in zip(documents, scores, strict=True):
                 doc_copy = doc.copy()
                 doc_copy['rerank_score'] = float(score)
                 doc_copy['rerank_model'] = self.model_name

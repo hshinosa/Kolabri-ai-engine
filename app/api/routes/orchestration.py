@@ -26,8 +26,6 @@ def dump_provider_context(provider_context):
 def resolve_provider_context(provider_context):
     if not settings.UNIFIED_PROVIDER_ENABLED:
         return None
-    if settings.UNIFIED_PROVIDER_ORCHESTRATION:
-        return dump_provider_context(provider_context)
     return dump_provider_context(provider_context)
 
 

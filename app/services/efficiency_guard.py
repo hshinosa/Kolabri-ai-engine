@@ -94,6 +94,28 @@ class RateLimiter:
         )
         return False
 
+    def peek(self, identifier: str) -> bool:
+        """
+        Check if a request would be allowed WITHOUT consuming a quota slot.
+
+        Performs the same time-window pruning as is_allowed so the stored
+        timestamps stay consistent, but never appends a request timestamp.
+
+        Args:
+            identifier: Unique identifier for the requester (user_id, group_id, etc.)
+
+        Returns:
+            True if a request would currently be allowed, False otherwise
+        """
+        now = datetime.now()
+        request_times = self.requests[identifier]
+
+        # Remove old requests outside the time window
+        while request_times and (now - request_times[0]) > self.time_window:
+            request_times.popleft()
+
+        return len(request_times) < self.max_requests
+
     def get_remaining_requests(self, identifier: str) -> int:
         """Get the number of remaining requests for an identifier."""
         now = datetime.now()
@@ -377,7 +399,7 @@ class EfficiencyGuard:
             "max_requests": self.rate_limiter.max_requests,
             "time_window_seconds": self.rate_limiter.time_window.total_seconds(),
             "remaining_requests": self.rate_limiter.get_remaining_requests(identifier),
-            "is_allowed": self.check_rate_limit(identifier),
+            "is_allowed": self.rate_limiter.peek(identifier),
         }
 
     def get_cache_statistics(self) -> Dict[str, Any]:

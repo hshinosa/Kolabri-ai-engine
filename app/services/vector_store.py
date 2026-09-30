@@ -95,13 +95,55 @@ class VectorStoreService:
             self._get_collection_name(course_id) if course_id else "default"
         )
 
+        # Fail loudly before any side effect: misaligned inputs would attach
+        # wrong metadata/ids to documents (silent data corruption in Qdrant).
+        if len(documents) != len(metadatas) or len(documents) != len(ids):
+            logger.error(
+                "add_documents_length_mismatch",
+                collection=target_collection,
+                documents=len(documents),
+                metadatas=len(metadatas),
+                ids=len(ids),
+            )
+            raise ValueError(
+                "documents, metadatas, and ids must have equal lengths: "
+                f"documents={len(documents)}, metadatas={len(metadatas)}, "
+                f"ids={len(ids)}"
+            )
+
         await self._ensure_collection(target_collection)
 
         embeddings = await self._embedding_service.embed_texts(documents)
 
+        # Embeddings come from an external provider that is not validated to
+        # return exactly len(documents) items. Fewer embeddings would silently
+        # drop documents from the upsert; raise instead of corrupting.
+        if len(embeddings) < len(documents):
+            logger.error(
+                "add_documents_embedding_length_mismatch",
+                collection=target_collection,
+                documents=len(documents),
+                embeddings=len(embeddings),
+            )
+            raise ValueError(
+                "embedding provider returned fewer embeddings than documents: "
+                f"documents={len(documents)}, embeddings={len(embeddings)}"
+            )
+        if len(embeddings) > len(documents):
+            # Extra trailing embeddings cannot pair with any document; every
+            # document still gets its own embedding. Trim explicitly so the
+            # zip below is provably length-equal.
+            logger.warning(
+                "add_documents_extra_embeddings",
+                collection=target_collection,
+                documents=len(documents),
+                embeddings=len(embeddings),
+            )
+            embeddings = embeddings[: len(documents)]
+
         points = []
         for i, (doc, meta, doc_id, embedding) in enumerate(
-            zip(documents, metadatas, ids, embeddings)
+            zip(documents, metadatas, ids, embeddings, strict=True)
         ):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id))
             payload = {**meta, "content": doc, "document_id": doc_id}

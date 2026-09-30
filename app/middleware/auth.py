@@ -9,33 +9,10 @@ Provides API key authentication for sensitive endpoints.
 from fastapi import Request, HTTPException, Depends
 from typing import Optional
 import hmac
-from functools import wraps
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-def rate_limited_auth(func):
-    """
-    Decorator to apply rate limiting to auth endpoint.
-    Limits to 5 requests per minute per IP address.
-    """
-    @wraps(func)
-    async def wrapper(request: Request, *args, **kwargs):
-        # Get client IP
-        client_ip = request.client.host if request.client else "unknown"
-        
-        # Check rate limit (simple in-memory implementation)
-        # For production, use Redis or similar distributed store
-        import time
-        current_time = time.time()
-        
-        # This is a simplified implementation
-        # Full implementation requires slowapi integration with FastAPI app state
-        return await func(request, *args, **kwargs)
-    
-    return wrapper
 
 
 def validate_api_key(api_key: str) -> bool:

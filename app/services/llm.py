@@ -211,7 +211,7 @@ class OpenAILLMService:
             )
             result.response_time_ms = (time.time() - start) * 1000
             return result
-        except CircuitBreakerOpenError:
+        except CircuitBreakerOpenError as err:
             elapsed = (time.time() - start) * 1000
             retry_after = max(1, int(breaker.recovery_timeout))
             logger.warning(
@@ -219,7 +219,9 @@ class OpenAILLMService:
                 retry_after=retry_after,
                 response_time_ms=round(elapsed, 2),
             )
-            raise LLMDegradedError(reason="llm_circuit_open", retry_after=retry_after)
+            raise LLMDegradedError(
+                reason="llm_circuit_open", retry_after=retry_after
+            ) from err
         except (RateLimitError, APIConnectionError, APIError) as exc:
             elapsed = (time.time() - start) * 1000
             logger.warning(
@@ -230,7 +232,7 @@ class OpenAILLMService:
             raise LLMDegradedError(
                 reason="llm_retry_exhausted",
                 retry_after=settings.LLM_RETRY_DEFAULT_RETRY_AFTER_SECONDS,
-            )
+            ) from exc
         except Exception as exc:
             elapsed = (time.time() - start) * 1000
             logger.error(

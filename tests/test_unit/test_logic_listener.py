@@ -13,7 +13,7 @@ Tests for real-time group monitoring:
 import pytest
 import time
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.logic_listener import (
     LogicListener,
     InterventionTrigger,
@@ -300,8 +300,13 @@ async def test_off_topic_check_irrelevant_message(listener):
     # Mock embedding similarity and logger
     with (
         patch.object(listener, "_calculate_cosine_similarity", return_value=0.4),
+        # Stub the whole service: the real one is a provider-dependent global
+        # singleton (Voyage has no get_embedding), so patching the attribute on
+        # it made this test fail depending on which provider was cached first.
         patch.object(
-            listener.embedding_service, "get_embedding", new_callable=AsyncMock
+            listener,
+            "embedding_service",
+            new=MagicMock(get_embedding=AsyncMock()),
         ),
         patch.object(listener, "_log_intervention", new_callable=AsyncMock),
     ):
@@ -480,11 +485,13 @@ async def test_embedding_service_exception_handling(listener):
     """Test that embedding service errors are handled gracefully."""
     await listener.set_group_topic("group_1", "Database")
 
-    # Mock embedding service to raise exception
+    # Stub the whole service (provider-dependent singleton; see off-topic test)
     with patch.object(
-        listener.embedding_service,
-        "get_embedding",
-        side_effect=Exception("Embedding failed"),
+        listener,
+        "embedding_service",
+        new=MagicMock(
+            get_embedding=AsyncMock(side_effect=Exception("Embedding failed"))
+        ),
     ):
         result = await listener.check_relevance("Test message", "group_1")
 

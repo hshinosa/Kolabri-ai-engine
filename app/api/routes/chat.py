@@ -58,13 +58,9 @@ def dump_provider_context(provider_context: Any) -> dict[str, Any] | None:
     return provider_context
 
 
-def resolve_provider_context(
-    provider_context: Any, feature_flag: bool
-) -> dict[str, Any] | None:
+def resolve_provider_context(provider_context: Any) -> dict[str, Any] | None:
     if not settings.UNIFIED_PROVIDER_ENABLED:
         return None
-    if feature_flag:
-        return dump_provider_context(provider_context)
     return dump_provider_context(provider_context)
 
 
@@ -99,10 +95,7 @@ async def ask_question(request: AskRequest):
         validate_course_id(request.course_id)
 
         rag_pipeline = get_rag_pipeline(
-            provider_context=resolve_provider_context(
-                request.provider_context,
-                settings.UNIFIED_PROVIDER_RAG,
-            )
+            provider_context=resolve_provider_context(request.provider_context)
         )
 
         collection_name = f"course_{request.course_id}"
@@ -155,10 +148,7 @@ async def get_reading_recommendations(request: ReadingRecommendationRequest):
         validate_course_id(request.course_id)
 
         rag_pipeline = get_rag_pipeline(
-            provider_context=resolve_provider_context(
-                request.provider_context,
-                settings.UNIFIED_PROVIDER_RAG,
-            )
+            provider_context=resolve_provider_context(request.provider_context)
         )
         collection_name = f"course_{request.course_id}"
         raw_results = await rag_pipeline.vector_store.search(
@@ -325,20 +315,15 @@ def build_rag_context_and_citations(
 async def personal_chat(request: PersonalChatRequest):
     try:
         llm = get_llm_service(
-            provider_context=resolve_provider_context(
-                request.provider_context,
-                settings.UNIFIED_PROVIDER_PERSONAL_CHAT,
-            )
+            provider_context=resolve_provider_context(request.provider_context)
         )
+        await llm.ensure_ready()
 
         system_prompt = PERSONAL_CHAT_SYSTEM_PROMPT
         citations = []
 
         if request.course_ids:
-            resolved_ctx = resolve_provider_context(
-                request.provider_context,
-                settings.UNIFIED_PROVIDER_PERSONAL_CHAT,
-            )
+            resolved_ctx = resolve_provider_context(request.provider_context)
             rag_results = await search_personal_rag(
                 request.message,
                 request.course_ids,
@@ -398,10 +383,7 @@ async def personal_chat(request: PersonalChatRequest):
     summary="Personal AI chat with RAG and SSE streaming",
 )
 async def personal_chat_stream(request: PersonalChatRequest):
-    resolved_ctx = resolve_provider_context(
-        request.provider_context,
-        settings.UNIFIED_PROVIDER_PERSONAL_CHAT,
-    )
+    resolved_ctx = resolve_provider_context(request.provider_context)
     llm = get_llm_service(provider_context=resolved_ctx)
 
     system_prompt = PERSONAL_CHAT_SYSTEM_PROMPT

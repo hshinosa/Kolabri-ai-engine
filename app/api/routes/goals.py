@@ -33,8 +33,6 @@ def resolve_provider_context(
 ) -> Optional[dict[str, Any]]:
     if not settings.UNIFIED_PROVIDER_ENABLED:
         return None
-    if settings.UNIFIED_PROVIDER_GOALS:
-        return dump_provider_context(provider_context)
     return dump_provider_context(provider_context)
 
 
@@ -63,6 +61,7 @@ async def validate_goal(request: Request):
             session_discussion_id = body.session_discussion_id
             group_id = body.group_id
             week_context = body.week_context
+            provider_context = dump_provider_context(body.provider_context)
         else:
             form = await request.form()
             goal_text = str(form.get("goal_text", ""))
@@ -75,6 +74,14 @@ async def validate_goal(request: Request):
                     week_context = json.loads(str(raw_ctx))
                 except json.JSONDecodeError:
                     week_context = None
+            raw_provider_ctx = form.get("provider_context")
+            if raw_provider_ctx:
+                try:
+                    provider_context = dump_provider_context(
+                        ProviderContextV1.model_validate_json(str(raw_provider_ctx))
+                    )
+                except (ValueError, TypeError):
+                    provider_context = None
 
         orchestrator = get_orchestrator(provider_context=provider_context)
         result = await orchestrator.validate_goal(
@@ -133,11 +140,11 @@ async def get_goal_refinement(
 
         return JSONResponse(content=result)
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as err:
         logger.exception("goal_refinement_json_error")
         raise HTTPException(
             status_code=400, detail="Invalid JSON format for missing_criteria"
-        )
+        ) from err
     except Exception:
         logger.exception("goal_refinement_api_failed")
         raise

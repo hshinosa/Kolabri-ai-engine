@@ -20,6 +20,27 @@ logger = get_logger(__name__)
 ProviderContext = Dict[str, Any]
 
 
+def _normalize_timestamp(value: Any) -> Optional[datetime]:
+    """Normalize a message/intervention timestamp to naive local time.
+
+    Accepts ISO-8601 strings (including a trailing ``Z``) and ``datetime``
+    objects; returns ``None`` for missing or unparseable values so callers
+    can skip the entry instead of raising. Parsed aware timestamps are
+    converted to naive local time — the format produced by ``datetime.now()``
+    — so comparisons never mix aware and naive datetimes (TypeError).
+    """
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone().replace(tzinfo=None)
+    return value
+
+
 class InterventionType(str, Enum):
     """Types of chat interventions."""
 
@@ -312,15 +333,12 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """
 
         # Check for inactivity
         if messages:
-            last_message_time = messages[-1].get("timestamp")
+            last_message_time = _normalize_timestamp(
+                messages[-1].get("timestamp")
+            )
             if last_message_time:
-                if isinstance(last_message_time, str):
-                    last_message_time = datetime.fromisoformat(
-                        last_message_time.replace("Z", "+00:00")
-                    )
-
                 minutes_since = (
-                    datetime.now(last_message_time.tzinfo) - last_message_time
+                    datetime.now() - last_message_time
                 ).total_seconds() / 60
                 if minutes_since > self.inactivity_threshold_minutes:
                     triggers["inactive"] = True
@@ -329,13 +347,13 @@ Buat pertanyaan yang memicu diskusi mendalam dan bermakna. """
         # Check if enough messages for summary
         if len(messages) >= self.minimum_messages_for_summary:
             # Check if no recent summary
-            if last_intervention_time:
+            cutoff = _normalize_timestamp(last_intervention_time)
+            if cutoff is not None:
                 messages_since_intervention = [
                     m
                     for m in messages
-                    if m.get("timestamp")
-                    and datetime.fromisoformat(m["timestamp"].replace("Z", "+00:00"))
-                    > last_intervention_time
+                    if (ts := _normalize_timestamp(m.get("timestamp"))) is not None
+                    and ts > cutoff
                 ]
                 if (
                     len(messages_since_intervention)

@@ -208,7 +208,9 @@ async def test_llm_close():
         patch.object(llm_module.settings, "OPENAI_MAX_TOKENS", 100),
         patch.object(llm_module.settings, "ENV", "testing"),
     ):
-        svc = OpenAILLMService()
+        # provider_context={} forces the eager-configure path so a client
+        # exists to close (plain constructor is lazy in unified mode).
+        svc = OpenAILLMService(provider_context={})
         await svc.close()
     http.aclose.assert_awaited_once()
 

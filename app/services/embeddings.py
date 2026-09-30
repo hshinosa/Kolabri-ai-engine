@@ -68,11 +68,6 @@ class VoyageEmbeddingService:
         if not self._initialized:
             self.initialize()
 
-    @property
-    def degraded(self) -> bool:
-        """True when the service fell back to the local provider."""
-        return self._fallback is not None
-
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.aclose()

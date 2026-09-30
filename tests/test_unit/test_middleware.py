@@ -1,6 +1,5 @@
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, Request
@@ -9,7 +8,6 @@ from fastapi.testclient import TestClient
 from app.core.config import settings
 from app.middleware.auth import (
     optional_auth,
-    rate_limited_auth,
     require_auth,
     validate_api_key,
 )
@@ -262,52 +260,6 @@ class TestOptionalAuth:
             result = await optional_auth(request)
 
         assert result == {"authenticated": True}
-
-
-class TestRateLimitedAuth:
-    @pytest.mark.unit
-    def test_rate_limited_auth_wraps_async_function_and_returns_result(self):
-        captured = {}
-
-        async def sample_handler(request, value, flag=False):
-            captured["client"] = request.client.host
-            captured["value"] = value
-            captured["flag"] = flag
-            return {"ok": True, "value": value, "flag": flag}
-
-        wrapped = rate_limited_auth(sample_handler)
-        request = make_mock_request()
-
-        result = asyncio.run(wrapped(request, 42, flag=True))
-
-        assert result == {"ok": True, "value": 42, "flag": True}
-        assert captured == {"client": "127.0.0.1", "value": 42, "flag": True}
-        assert wrapped.__name__ == sample_handler.__name__
-
-    @pytest.mark.unit
-    def test_rate_limited_auth_allows_missing_client(self):
-        async def sample_handler(request):
-            return {"client": request.client}
-
-        wrapped = rate_limited_auth(sample_handler)
-        request = make_mock_request(include_client=False)
-
-        result = asyncio.run(wrapped(request))
-
-        assert result == {"client": None}
-
-    @pytest.mark.unit
-    def test_rate_limited_auth_calls_time_and_underlying_function_once(self):
-        request = make_mock_request(client_host="10.1.2.3")
-        wrapped_func = AsyncMock(return_value={"done": True})
-        wrapped = rate_limited_auth(wrapped_func)
-
-        with patch("time.time", return_value=12345.6) as mock_time:
-            result = asyncio.run(wrapped(request))
-
-        assert result == {"done": True}
-        mock_time.assert_called_once_with()
-        wrapped_func.assert_awaited_once_with(request)
 
 
 class TestLimitRequestSizeMiddleware:

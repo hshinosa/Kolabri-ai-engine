@@ -255,8 +255,10 @@ class DocumentProcessor:
         # If file_path is provided but no content, read only what's needed for hash
         if file_content is None and file_path is not None:
             # Compute hash by streaming the file instead of loading all into RAM
-            content_hash = self._compute_content_hash_from_path(file_path)
-            file_size = os.path.getsize(file_path)
+            content_hash = await asyncio.to_thread(
+                self._compute_content_hash_from_path, file_path
+            )
+            file_size = await asyncio.to_thread(os.path.getsize, file_path)
         elif file_content is not None:
             content_hash = self._compute_content_hash(file_content)
             file_size = len(file_content)
@@ -343,7 +345,7 @@ class DocumentProcessor:
                 content_for_processing = (
                     file_content
                     if file_content is not None
-                    else self._read_file_bytes(file_path)
+                    else await asyncio.to_thread(self._read_file_bytes, file_path)
                 )
                 result = await self._process_docx(
                     content_for_processing, filename, document_id, metadata
@@ -355,7 +357,7 @@ class DocumentProcessor:
                 content_for_processing = (
                     file_content
                     if file_content is not None
-                    else self._read_file_bytes(file_path)
+                    else await asyncio.to_thread(self._read_file_bytes, file_path)
                 )
                 result = await self._process_pptx(
                     content_for_processing, filename, document_id, metadata
@@ -367,7 +369,7 @@ class DocumentProcessor:
                 content_for_processing = (
                     file_content
                     if file_content is not None
-                    else self._read_file_bytes(file_path)
+                    else await asyncio.to_thread(self._read_file_bytes, file_path)
                 )
                 result = await self._process_text(
                     content_for_processing, filename, document_id, file_type, metadata
@@ -380,7 +382,7 @@ class DocumentProcessor:
                 content_for_processing = (
                     file_content
                     if file_content is not None
-                    else self._read_file_bytes(file_path)
+                    else await asyncio.to_thread(self._read_file_bytes, file_path)
                 )
                 batch_result = await self.process_zip(
                     content_for_processing,
@@ -393,7 +395,6 @@ class DocumentProcessor:
                     del content_for_processing
                     gc.collect()
                 # Aggregate results
-                total_chunks = sum(len(doc.chunks) for doc in batch_result.documents)
                 return ProcessedDocument(
                     filename=filename,
                     file_type="zip",
@@ -413,7 +414,7 @@ class DocumentProcessor:
                 content_for_processing = (
                     file_content
                     if file_content is not None
-                    else self._read_file_bytes(file_path)
+                    else await asyncio.to_thread(self._read_file_bytes, file_path)
                 )
                 result = await self._process_image(
                     content_for_processing, filename, document_id, metadata
@@ -463,6 +464,52 @@ class DocumentProcessor:
                 error="Internal error",
             )
 
+    @staticmethod
+    def _extract_zip_members(zip_path: str, extract_dir: str) -> List[str]:
+        """Extract safe archive members to extract_dir and return their names.
+
+        Blocking (path checks + zip decompress); run off the event loop.
+        """
+        os.makedirs(extract_dir, exist_ok=True)
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            # Security: Sanitize namelist to prevent Path Traversal (Zip Slip)
+            file_list = []
+            for f in zip_ref.namelist():
+                if (
+                    f.endswith("/")
+                    or Path(f).name.startswith(".")
+                    or f.startswith("__MACOSX")
+                ):
+                    continue
+
+                # Normalize path and check if it tries to go outside current dir
+                safe_path = os.path.normpath(f)
+                if safe_path.startswith("..") or os.path.isabs(safe_path):
+                    logger.warning("skipping_unsafe_zip_path", path=f)
+                    continue
+
+                if (
+                    Path(f).suffix.lower() in DocumentProcessor.SUPPORTED_EXTENSIONS
+                    and Path(f).suffix.lower() != ".zip"
+                ):
+                    file_list.append(f)
+
+            logger.info("zip_extraction_started", total_files=len(file_list))
+            zip_ref.extractall(extract_dir, members=file_list)
+
+        return file_list
+
+    @staticmethod
+    def _remove_temp_dir(temp_dir: str) -> None:
+        """Remove a temp directory if present (blocking; run off the event loop)."""
+        if not os.path.exists(temp_dir):
+            return
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            logger.exception("temp_cleanup_failed")
+
     async def process_zip(
         self,
         zip_content: bytes,
@@ -499,43 +546,18 @@ class DocumentProcessor:
             temp_dir = tempfile.mkdtemp(prefix="kolabri_zip_")
             zip_path = os.path.join(temp_dir, "archive.zip")
 
-            # Write ZIP to temp file first
-            with open(zip_path, "wb") as f:
-                f.write(zip_content)
+            # Write ZIP to temp file first (blocking I/O off the event loop)
+            await asyncio.to_thread(Path(zip_path).write_bytes, zip_content)
 
             # Free the zip_content from memory
             del zip_content
             gc.collect()
 
-            # Extract files
+            # Extract files (blocking zip decompress; run off the event loop)
             extract_dir = os.path.join(temp_dir, "extracted")
-            os.makedirs(extract_dir, exist_ok=True)
-
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                # Security: Sanitize namelist to prevent Path Traversal (Zip Slip)
-                file_list = []
-                for f in zip_ref.namelist():
-                    if (
-                        f.endswith("/")
-                        or Path(f).name.startswith(".")
-                        or f.startswith("__MACOSX")
-                    ):
-                        continue
-
-                    # Normalize path and check if it tries to go outside current dir
-                    safe_path = os.path.normpath(f)
-                    if safe_path.startswith("..") or os.path.isabs(safe_path):
-                        logger.warning("skipping_unsafe_zip_path", path=f)
-                        continue
-
-                    if (
-                        Path(f).suffix.lower() in self.SUPPORTED_EXTENSIONS
-                        and Path(f).suffix.lower() != ".zip"
-                    ):
-                        file_list.append(f)
-
-                logger.info("zip_extraction_started", total_files=len(file_list))
-                zip_ref.extractall(extract_dir, members=file_list)
+            file_list = await asyncio.to_thread(
+                self._extract_zip_members, zip_path, extract_dir
+            )
 
             # Remove the zip file to free space
             os.remove(zip_path)
@@ -546,7 +568,7 @@ class DocumentProcessor:
                 filename = Path(file_path).name
                 full_path = os.path.join(extract_dir, file_path)
 
-                if not os.path.exists(full_path):
+                if not await asyncio.to_thread(os.path.exists, full_path):
                     continue
 
                 logger.info(
@@ -606,12 +628,9 @@ class DocumentProcessor:
                 processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
             )
         finally:
-            # Clean up temp directory
-            if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir)
-                except Exception:
-                    logger.exception("temp_cleanup_failed")
+            # Clean up temp directory (blocking; run off the event loop)
+            if temp_dir:
+                await asyncio.to_thread(self._remove_temp_dir, temp_dir)
             gc.collect()
 
     async def _process_file_from_path(

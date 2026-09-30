@@ -152,7 +152,7 @@ class RAGPipeline:
                 v2 = await embedder.get_embedding(self._last_query)
                 self._last_query_embedding = v2
 
-            dot_product = sum(a * b for a, b in zip(v1, v2))
+            dot_product = sum(a * b for a, b in zip(v1, v2, strict=True))
             norm1 = math.sqrt(sum(a * a for a in v1))
             norm2 = math.sqrt(sum(b * b for b in v2))
             if norm1 == 0 or norm2 == 0:
@@ -699,8 +699,6 @@ class RAGPipeline:
             {"type": "done", "sources": [...], "citations": [...]}  — terminator
             {"type": "error", "content": str}    — error
         """
-        from app.services.week_rag import week_metadata_filter
-
         week_context_answer = self._answer_from_week_context(query, week_context)
         if week_context_answer is not None:
             yield {
@@ -713,11 +711,6 @@ class RAGPipeline:
             }
             yield {"type": "done", "sources": [], "citations": []}
             return
-
-        effective_filter = filter_metadata
-        week_cap = week_metadata_filter(max_week_index)
-        if week_cap:
-            effective_filter = {**(filter_metadata or {}), **week_cap}
 
         # Input guardrail (same as query())
         guardrail_result = self.guardrails.check_input(query, guardrail_context)

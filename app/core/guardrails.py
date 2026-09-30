@@ -559,8 +559,6 @@ Mari fokus pada pembelajaran bersama!""",
         Returns:
             GuardrailResult with action
         """
-        response_lower = response.lower()
-
         # 1. Grounding Check (Mencegah Halusinasi)
         if contexts and not self._is_grounded_in(response, contexts):
             return self._apply_policy(
