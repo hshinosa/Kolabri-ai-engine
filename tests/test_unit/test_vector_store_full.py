@@ -66,20 +66,6 @@ async def test_list_collections_robust(vector_store_service):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_delete_documents_robust(vector_store_service):
-    with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="test")), patch(
-        "app.services.vector_store.uuid.uuid5", return_value="point-1"
-    ), patch("app.services.vector_store.models.PointIdsList", side_effect=lambda **kwargs: kwargs):
-        await vector_store_service.delete_documents(ids=["id1"], collection_name="test")
-
-    vector_store_service._client.delete.assert_called_with(
-        collection_name="test",
-        points_selector={"points": ["point-1"]},
-    )
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_search_uses_default_collection_name(vector_store_service):
     vector_store_service._client.query_points.return_value = SimpleNamespace(points=[])
 

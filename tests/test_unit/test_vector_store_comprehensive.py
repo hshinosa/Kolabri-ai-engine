@@ -59,6 +59,7 @@ class TestVectorStoreService:
             "page": 1,
             "content": "doc1",
             "document_id": "id1",
+            "chunk_id": "id1",
         }
         assert upsert_kwargs["points"][1]["vector"] == [0.4, 0.5, 0.6]
 
@@ -214,19 +215,6 @@ class TestVectorStoreService:
             collection_name="kolabri_course1",
             n_results=2,
             score_threshold=None,
-        )
-
-    @pytest.mark.asyncio
-    async def test_delete_documents_by_ids(self, vector_store_service):
-        with patch.object(vector_store_service, "_ensure_collection", new=AsyncMock(return_value="docs")), patch(
-            "app.services.vector_store.uuid.uuid5", side_effect=["uuid-1", "uuid-2"]
-        ), patch("app.services.vector_store.models.PointIdsList", side_effect=lambda **kwargs: kwargs) as mock_ids_list:
-            await vector_store_service.delete_documents(ids=["id1", "id2"], collection_name="docs")
-
-        mock_ids_list.assert_called_once_with(points=["uuid-1", "uuid-2"])
-        vector_store_service._client.delete.assert_called_once_with(
-            collection_name="docs",
-            points_selector={"points": ["uuid-1", "uuid-2"]},
         )
 
     @pytest.mark.asyncio

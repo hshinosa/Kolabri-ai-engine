@@ -146,7 +146,10 @@ class VectorStoreService:
             documents, metadatas, ids, embeddings, strict=True
         ):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id))
-            payload = {**meta, "content": doc, "document_id": doc_id}
+            # Keep the caller's document_id (the knowledge-base id) intact: it is the
+            # field deletion filters on. The per-chunk identifier lives in chunk_id.
+            payload = {**meta, "content": doc, "chunk_id": doc_id}
+            payload.setdefault("document_id", doc_id)
             points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
 
         self._client.upsert(
@@ -266,13 +269,24 @@ class VectorStoreService:
             await self._ensure_collection(target_collection)
 
             if ids:
-                point_ids = [
-                    str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_id)) for doc_id in ids
-                ]
-                self._client.delete(
-                    collection_name=target_collection,
-                    points_selector=models.PointIdsList(points=point_ids),
-                )
+                # Points are keyed by uuid5(chunk_id) where chunk_id is
+                # f"{document_id}_p{page}_c{index}" (see document_processing/chunking.py),
+                # so uuid5(document_id) never matches a stored point. Delete by the
+                # document_id payload field instead, which every chunk carries.
+                for doc_id in ids:
+                    self._client.delete(
+                        collection_name=target_collection,
+                        points_selector=models.FilterSelector(
+                            filter=Filter(
+                                must=[
+                                    FieldCondition(
+                                        key="document_id",
+                                        match=MatchValue(value=doc_id),
+                                    )
+                                ]
+                            )
+                        ),
+                    )
             elif where:
                 conditions = []
                 for key, value in where.items():
