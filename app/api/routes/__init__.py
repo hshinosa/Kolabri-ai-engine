@@ -15,6 +15,7 @@ from app.api.routes.documents import router as _documents_router
 from app.api.routes.chat import router as _chat_router
 from app.api.routes.discussion_direction import router as _discussion_direction_router
 from app.api.routes.admin import router as _admin_router
+from app.api.routes.srl import router as _srl_router
 
 from app.api.routes.documents import (
     _process_ingest_background,
@@ -37,6 +38,7 @@ router.include_router(_orchestration_router)
 router.include_router(_interventions_router)
 router.include_router(_discussion_direction_router)
 router.include_router(_admin_router)
+router.include_router(_srl_router)
 
 __all__ = [
     "router",

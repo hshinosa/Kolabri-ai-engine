@@ -69,6 +69,9 @@ class EnhancedSRLClassifier:
             r"\b(niat|berniat|bermaksud)\b",
             r"\b(target|goals|objective)-?\w*\b",
             r"\b(kita mau target(?:kan)? )",
+            r"\b(topik|bahasan|materi)\s+(kita|hari ini|minggu ini)\b",
+            r"\b(kita|kami|aku|saya)\s+(akan|mau|ingin|perlu|harus)\s+(membahas|membaca|mempelajari|mengerjakan|mencoba|menganalisis|menguji|membuat|mendesain)\b",
+            r"\b(niatku|tujuan aku|tujuan kita|yang mau (kita|aku) capai|capaian kita)\b",
         ],
         "planning": [
             r"\b(rencana|strategi|langkah|plan|berencana|merencanakan)\b",
@@ -81,6 +84,9 @@ class EnhancedSRLClassifier:
             r"\b(minggu ini|minggu depan|besok|nanti)\s+(akan|mau|saya)",
             r"\b(struktur|alur|urutan)\s+(langkah|tahapan|proses)\b",
             r"\b(bagi tugas|distribusi peran)",
+            r"\b(rencana|strategi|langkah|target|tujuan|sasaran|jadwal|tenggat|deadline|prioritas|persiapan|timeline|schedule|plan)\w*\b",
+            r"\b(yang pertama|pertama-tama|langkah pertama|tahap awal|sebelum (kita )?(mulai|memulai|bahas|diskusi))\b",
+            r"\bkita (mulai|buka|bahas|kerjakan|kerjain|bagi|putar)\b",
         ],
     }
 
@@ -94,6 +100,13 @@ class EnhancedSRLClassifier:
             r"\b(implementasi|penerapan|cara kerja)\b",
             r"\b(algoritma|method|approach)",
             r"\b(dimulai dari|dilanjutkan dengan)",
+            r"\b(berdasarkan|dari|sesuai)\s+(analisis|evaluasi|pengalaman|observasi|hasil)\b",
+            r"\b(aku|saya|menurutku|menurut aku|gue)\s+(menganalisis|membandingkan|mengusulkan|menemukan|menguji|mendesain|merancang|memilih)\b",
+            r"\b(kelebihan|kekurangan|trade-?offs?|limitasi)\b",
+            r"\b(lebih (efisien|cepat|baik|robust|tepat|aman|stabil|hemat|murah))\b",
+            r"\b(sehingga|makanya|oleh karena itu|dengan begitu)\b",
+            r"\b(menurutku|menurut aku|kalau menurutku|kayaknya|sepertinya)\b",
+            r"\b(kasus terburuk\w*|kasus terbaik\w*|rata-rata|di sisi lain)\b",
         ],
         "monitoring_control": [
             r"\b(apakah|sudahkah)\s+(kita|kalian)\b",
@@ -103,6 +116,14 @@ class EnhancedSRLClassifier:
             r"\b(tunggu|sebentar|wait)\b.*\b(cek|periksa|review)\b",
             r"\b(apakah sudah|sudahkah sudah)",
             r"\b(coba cek|periksa dulu)",
+            r"\b(gimana|bagaimana|kenapa|mengapa|berapa|dimana|kapan|apa|apakah|bisakah|dapatkah)\b[^\n]{0,60}\?",
+            r"\b(apa|kenapa|gimana|bagaimana)\s+(sih|dong|ya|gak|nggak|enggak|kok)\b",
+            r"\b(bingung|pusing|keder|ragu)\w*\b",
+            r"\b(belum|masih belum|aku belum|saya belum)\s+(paham|ngerti|mengerti|jelas|tau|tahu)\b",
+            r"\b(ada yang|ada siapa|siapa yang|mana yang)\s+(bisa|mau|tahu|tau)\b",
+            r"\b(jelaskan|jelasin|terangkan|uraikan|tolong jelaskan|bantu jelaskan)\w*\b",
+            r"\b(susah|ribet|rumit|kompleks|deg-degan|cemas|khawatir|berat)\w*\b",
+            r"\b(udah|sudah)\s+\w*\s*(ngerjain|negerjain|selesai|beres|kumpul)\w*\b",
         ],
     }
 
@@ -115,6 +136,10 @@ class EnhancedSRLClassifier:
             r"\b(ternyata|rupanya|jadi begitu)\b",
             r"\b(setelah praktik|setelah latihan)",
             r"\bbaru paham|baru ngerti",
+            r"\b(menyimpulkan|disimpulkan|simpulkan|ringkasan\w*|rekapitulasi)\b",
+            r"\b(akhirnya (paham|ngerti|tau|mengerti)|selesai sudah|setelah semua selesai)\b",
+            r"\b(yang aku (kira|pikir|duga)[^.!?]{0,40}(ternyata|nyatanya|rupanya))\b",
+            r"\b(pelajaran hari ini|yang sudah aku pelajari|hasil belajar)\b",
         ],
         "metacognitive_adaptation": [
             r"\b(perlu|harus|sebaiknya)\s+(belajar|perbaiki|tingkatkan)\b",
@@ -124,6 +149,8 @@ class EnhancedSRLClassifier:
             r"\b(evaluasi|review|refleksi)\b",
             r"\b(perlu dipelajari lagi|lebih dalam lagi)",
             r"\b(learning point|takeaway)",
+            r"\b(perlu (dilatih|dipraktikkan|diulang|dievaluasi|dipelajari)|harus (dilatih|diulang|diperbaiki|dipelajari lagi))\b",
+            r"\b(mau belajar lagi|latih lagi|ulangi lagi|evaluasi diri|refleksi diri)\b",
         ],
     }
 

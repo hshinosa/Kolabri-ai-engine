@@ -137,14 +137,14 @@ class MongoDBLogger:
         output = io.StringIO()
         writer = csv.writer(output)
         
-        writer.writerow(["CaseID", "Activity", "Timestamp", "Resource", "Lifecycle", "original_text", "srl_object", "educational_category", "is_hot", "lexical_variety", "scaffolding_trigger"])
+        writer.writerow(["CaseID", "Activity", "Timestamp", "Resource", "Lifecycle", "original_text", "srl_object", "educational_category", "is_hot", "lexical_variety", "scaffolding_trigger", "srl_phase", "srl_sub_phase", "srl_confidence"])
         
         for log in logs:
             attr = log.get("Attributes", {})
             writer.writerow([
                 log.get(f, "") for f in ["CaseID", "Activity", "Timestamp", "Resource", "Lifecycle"]
             ] + [
-                attr.get(f, "") for f in ["original_text", "srl_object", "educational_category", "is_hot", "lexical_variety", "scaffolding_trigger"]
+                attr.get(f, "") for f in ["original_text", "srl_object", "educational_category", "is_hot", "lexical_variety", "scaffolding_trigger", "srl_phase", "srl_sub_phase", "srl_confidence"]
             ])
             
         return output.getvalue()
