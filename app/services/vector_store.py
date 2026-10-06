@@ -257,6 +257,46 @@ class VectorStoreService:
             "distances": distances,
         }
 
+    async def update_payload_metadata(
+        self,
+        collection_name: str,
+        document_id: str,
+        metadata: Dict[str, Any],
+    ) -> bool:
+        """
+        Merge metadata baru (mis. week_index saat materi di-assign ke minggu)
+        ke SEMUA chunk existing milik satu document_id. Dipakai saat ingest
+        di-skip oleh idempotency (konten sama) tapi metadata berubah — tanpa
+        ini boost pencarian per-minggu tidak pernah aktif (bug E2E 2026-10-06).
+        """
+        if not metadata:
+            return False
+        try:
+            target = await self._ensure_collection(collection_name)
+            query_filter = Filter(
+                must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
+            )
+            await asyncio.to_thread(
+                self._client.set_payload,
+                collection_name=target,
+                payload=metadata,
+                points=query_filter,
+            )
+            logger.info(
+                "payload_metadata_updated",
+                collection=target,
+                document_id=document_id,
+                keys=list(metadata.keys()),
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "payload_metadata_update_failed",
+                collection=collection_name,
+                document_id=document_id,
+            )
+            return False
+
     async def delete_documents(
         self,
         ids: Optional[List[str]] = None,

@@ -811,17 +811,23 @@ class RAGPipeline:
                 ratio=grounding_result.grounding_ratio,
                 ungrounded=grounding_result.ungrounded_claims[:2],
             )
+            # Dokumen yang di-retrieve tetap dikutip: jawaban scaffolding memang
+            # diblok, tapi mahasiswa perlu tahu materi mana yang relevan (sidebar
+            # dokumen hanya menampilkan yang terpanggil — tanpa citations di sini,
+            # dokumen hilang dari sidebar walau retrieval sukses).
+            sources, citations = self._extract_sources_and_citations(
+                search_results
+            )
             return RAGResult(
                 answer="Jawaban tidak dapat diberikan tanpa berspekulasi di luar materi yang tersedia.",
-                sources=self._extract_sources(search_results)
-                if search_results
-                else [],
+                sources=sources,
                 query=query,
                 tokens_used=llm_response.tokens_used,
                 success=True,
                 scaffolding_triggered=True,
                 processing_time_ms=(datetime.now() - start_time).total_seconds()
                 * 1000,
+                citations=citations,
             )
         return None
 

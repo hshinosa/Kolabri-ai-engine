@@ -299,6 +299,21 @@ class DocumentProcessor:
                 content_hash=content_hash[:16],
                 existing_doc_id=existing_doc_id,
             )
+            # Metadata bisa berubah walau konten sama (mis. materi di-assign ke
+            # minggu → week_index). Sinkronkan ke chunk existing supaya boost
+            # pencarian per-minggu aktif (bug E2E 2026-10-06: assign ulang tidak
+            # pernah menempel karena ingest dianggap sudah selesai).
+            sync_keys = {
+                k: v
+                for k, v in (metadata or {}).items()
+                if k in ("week_index", "week_id", "course_material_id") and v is not None
+            }
+            if sync_keys:
+                from app.services.vector_store import get_vector_store
+
+                await get_vector_store().update_payload_metadata(
+                    collection_name, existing_doc_id, sync_keys
+                )
             return ProcessedDocument(
                 filename=filename,
                 file_type=file_type,
