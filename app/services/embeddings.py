@@ -102,7 +102,29 @@ class VoyageEmbeddingService:
             if attempt + 1 < settings.VOYAGE_MAX_ATTEMPTS:
                 await asyncio.sleep(settings.VOYAGE_RETRY_BACKOFF * (attempt + 1))
 
-        raise EmbeddingProviderError(f"voyage embedding failed: {last_error}")
+        # Auto-degrade on error (sebelumnya HANYA saat API key kosong — saat
+        # Voyage rate-limit di tengah burst, error meledak utk sisanya dan
+        # 191/550 dokumen gagal diam saat test skalabilitas 2026-10-07).
+        logger.warning(
+            "voyage_exhausted_degrading_to_local",
+            error=str(last_error),
+        )
+        await self._degrade_to_local()
+        fallback = self._get_fallback()
+        if input_type == "query":
+            return [await fallback.embed_query(t) for t in batch]
+        return await fallback.embed_texts(batch)
+
+    async def _degrade_to_local(self) -> None:
+        """Tutup client Voyage → property `degraded` True → semua permintaan
+        berikutnya memakai FastEmbed lokal tanpa memanggil API lagi."""
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self._client = None
+        self._get_fallback()
 
     async def _embed(self, texts: List[str], input_type: str) -> List[List[float]]:
         self._ensure_initialized()
