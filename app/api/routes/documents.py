@@ -351,6 +351,39 @@ async def ingest_batch(
     )
 
 
+@router.patch(
+    "/documents/{document_id}/metadata",
+    tags=["Documents"],
+    summary="Merge metadata into all chunks of one document (e.g. week_index)",
+)
+async def update_document_metadata(
+    document_id: str,
+    payload: dict,
+    collection_name: str = Query(None, description="Collection containing the document"),
+):
+    """F7 pass2: sinkronkan metadata minggu ke Qdrant saat assign/unassign
+    tanpa re-ingest penuh. Nilai None diizinkan (clear week_index/week_id)."""
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict) or not metadata:
+        return JSONResponse(
+            status_code=422,
+            content={"success": False, "message": "metadata object wajib & tidak kosong"},
+        )
+    vector_store = get_vector_store()
+    target_collection = collection_name or "default"
+    ok = await vector_store.update_payload_metadata(
+        target_collection, document_id, metadata
+    )
+    if ok:
+        return JSONResponse(
+            content={"success": True, "message": f"Metadata updated for {document_id}"},
+        )
+    return JSONResponse(
+        status_code=502,
+        content={"success": False, "message": "Gagal update metadata"},
+    )
+
+
 @router.delete(
     "/documents/{document_id}",
     response_model=DocumentDeleteResponse,
