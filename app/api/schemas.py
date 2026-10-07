@@ -539,6 +539,9 @@ class PersonalChatRequest(BaseModel):
     history: List[PersonalChatMessage] = Field(default_factory=list, max_length=50)
     user_name: Optional[str] = None
     course_ids: Optional[List[str]] = Field(default=None, max_length=20)
+    # Fokus materi per-minggu (opsional): boost chunk week_index + batasi ke satu kursus
+    week_index: Optional[int] = Field(default=None, ge=1, le=60)
+    focus_course_id: Optional[str] = Field(default=None, max_length=64)
     provider_context: Optional[ProviderContextV1] = None
 
 

@@ -30,6 +30,7 @@ from app.services.llm import get_llm_service
 from app.services.rag import get_rag_pipeline
 
 logger = get_logger(__name__)
+from app.services.week_rag import rank_week_boosted_results
 
 router = APIRouter()
 
@@ -280,14 +281,27 @@ async def search_personal_rag(
     course_ids: list[str],
     top_k_per_course: int = 3,
     provider_context=None,
+    week_index: int | None = None,
+    focus_course_id: str | None = None,
 ) -> list[dict]:
-    """Search across multiple course collections and merge results."""
+    """Search across multiple course collections and merge results.
+
+    week_index: boost chunk minggu terpilih (rank_week_boosted_results —
+    chunk minggu lain tetap boleh ikut, hanya di bawah margin skor).
+    focus_course_id: persempit pencarian ke satu koleksi kursus.
+    """
     rag_pipeline = get_rag_pipeline(provider_context=provider_context)
 
     # Scan up to the schema-advertised bound (PersonalChatRequest.course_ids
     # max_length=20). Search collections concurrently so widening the scan
     # does not multiply latency.
-    scanned = course_ids[:MAX_PERSONAL_RAG_COURSES]
+    if focus_course_id:
+        scanned = [focus_course_id]
+    else:
+        scanned = course_ids[:MAX_PERSONAL_RAG_COURSES]
+
+    # Saat fokus minggu, ambil lebih banyak kandidat supaya boost punya bahan
+    n_results = top_k_per_course * 3 if week_index is not None else top_k_per_course
 
     async def _search_one(course_id: str) -> list[dict]:
         collection_name = f"course_{course_id}"
@@ -295,7 +309,7 @@ async def search_personal_rag(
             results = await rag_pipeline.vector_store.search(
                 query=query,
                 collection_name=collection_name,
-                n_results=top_k_per_course,
+                n_results=n_results,
                 score_threshold=0.35,
             )
             for r in results:
@@ -312,6 +326,8 @@ async def search_personal_rag(
     all_results = [r for results in per_course for r in results]
 
     all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
+    if week_index is not None:
+        all_results = rank_week_boosted_results(all_results, week_index)
     return all_results[:7]
 
 
@@ -376,6 +392,8 @@ async def personal_chat_stream(request: PersonalChatRequest):
             request.message,
             request.course_ids,
             provider_context=resolved_ctx,
+            week_index=request.week_index,
+            focus_course_id=request.focus_course_id,
         )
         if rag_results:
             context_str, citations = build_rag_context_and_citations(rag_results)
