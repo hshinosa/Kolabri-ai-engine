@@ -82,49 +82,43 @@ class VoyageEmbeddingService:
             "output_dimension": self._dimension,
         }
         last_error: Optional[BaseException] = None
+        hold_round = 0
 
-        for attempt in range(max(1, settings.VOYAGE_MAX_ATTEMPTS)):
-            try:
-                response = await self._client.post(self._url, json=payload)
-            except httpx.HTTPError as exc:
-                last_error = exc
-            else:
-                if response.status_code == 200:
-                    data = response.json().get("data", [])
-                    ordered = sorted(data, key=lambda item: item.get("index", 0))
-                    return [item["embedding"] for item in ordered]
-                last_error = RuntimeError(
-                    f"voyage {response.status_code}: {response.text[:200]}"
-                )
-                if response.status_code not in _RETRY_STATUS:
-                    break
+        while True:
+            for attempt in range(max(1, settings.VOYAGE_MAX_ATTEMPTS)):
+                try:
+                    response = await self._client.post(self._url, json=payload)
+                except httpx.HTTPError as exc:
+                    last_error = exc
+                else:
+                    if response.status_code == 200:
+                        data = response.json().get("data", [])
+                        ordered = sorted(data, key=lambda item: item.get("index", 0))
+                        return [item["embedding"] for item in ordered]
+                    last_error = RuntimeError(
+                        f"voyage {response.status_code}: {response.text[:200]}"
+                    )
+                    if response.status_code not in _RETRY_STATUS:
+                        # Salah konfigurasi (400/401/403/404) — hold percuma.
+                        raise EmbeddingProviderError(
+                            f"voyage embedding failed: {last_error}"
+                        )
 
-            if attempt + 1 < settings.VOYAGE_MAX_ATTEMPTS:
-                await asyncio.sleep(settings.VOYAGE_RETRY_BACKOFF * (attempt + 1))
+                if attempt + 1 < settings.VOYAGE_MAX_ATTEMPTS:
+                    await asyncio.sleep(settings.VOYAGE_RETRY_BACKOFF * (attempt + 1))
 
-        # Auto-degrade on error (sebelumnya HANYA saat API key kosong — saat
-        # Voyage rate-limit di tengah burst, error meledak utk sisanya dan
-        # 191/550 dokumen gagal diam saat test skalabilitas 2026-10-07).
-        logger.warning(
-            "voyage_exhausted_degrading_to_local",
-            error=str(last_error),
-        )
-        await self._degrade_to_local()
-        fallback = self._get_fallback()
-        if input_type == "query":
-            return [await fallback.embed_query(t) for t in batch]
-        return await fallback.embed_texts(batch)
-
-    async def _degrade_to_local(self) -> None:
-        """Tutup client Voyage → property `degraded` True → semua permintaan
-        berikutnya memakai FastEmbed lokal tanpa memanggil API lagi."""
-        if self._client is not None:
-            try:
-                await self._client.aclose()
-            except Exception:  # noqa: BLE001
-                pass
-            self._client = None
-        self._get_fallback()
+            # Rate limit / server error bertahan → HOLD sampai Voyage pulih
+            # (keputusan 2026-10-07: jangan fallback ke penyedia lokal —
+            # campur-dimensi embedding merusak retrieval; antre lebih baik).
+            hold_round += 1
+            wait_s = min(60, 5 * (2 ** min(hold_round - 1, 4)))  # 5,10,20,40,60,...
+            logger.warning(
+                "voyage_rate_limited_holding",
+                hold_round=hold_round,
+                wait_s=wait_s,
+                error=str(last_error),
+            )
+            await asyncio.sleep(wait_s)
 
     async def _embed(self, texts: List[str], input_type: str) -> List[List[float]]:
         self._ensure_initialized()
