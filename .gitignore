@@ -38,3 +38,5 @@ tests/load/results/
 
 # Probe/debug files
 tests/test_unit/_probe_*.py
+
+.env.backup
