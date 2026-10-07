@@ -699,7 +699,9 @@ def test_set_group_topic(mock_get_orchestrator, client):
 def test_check_group_status(mock_get_orchestrator, client):
     """Test /groups/{id}/status returns group monitoring status."""
     mock_orchestrator = MagicMock()
-    mock_orchestrator.check_group_status = AsyncMock(
+    # Endpoint check_group_status synchronous (tanpa await) — pakai MagicMock biasa,
+    # AsyncMock membuat result coroutine lalu result.get() meledak.
+    mock_orchestrator.check_group_status = MagicMock(
         return_value={
             "group_id": "group_1",
             "should_intervene": False,

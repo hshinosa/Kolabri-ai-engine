@@ -10,10 +10,12 @@ import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.srl_classifier import (
-    SRLClassifier,
+# Produksi (orchestration.py) memakai enhanced — modul lama sudah tidak dipakai.
+# Alias nama lama dipertahankan agar body test tetap sama.
+from app.services.srl_classifier_enhanced import (
+    EnhancedSRLClassifier as SRLClassifier,
     SRLPhase,
-    SRLClassificationResult,
+    EnhancedSRLClassificationResult as SRLClassificationResult,
     get_srl_classifier,
 )
 from app.services.orchestration import Orchestrator
@@ -251,11 +253,13 @@ class TestConversationHistorySRLTracking:
         """When signals are balanced, higher-weighted phases should win."""
         classifier = SRLClassifier()
 
-        # Create message with equal raw indicators across phases
+        # Sinyal reflection terkuat: evaluation_reflection + metacognitive_adaptation
+        # vs satu indikator performance — reflection menang karena lebih banyak
+        # indikator DAN bobot fase tertinggi (1.3).
         message = (
-            "Target kita hari ini belajar ML "  # forethought: 1 indicator
-            "menurut saya konsep ini jelas "  # performance: 1 indicator
-            "kesimpulannya perlu latihan lagi"  # reflection: 2 indicators (evaluation + metacognitive)
+            "Menurut saya konsep ini jelas "  # performance: 1 indicator
+            "kesimpulannya perlu latihan lagi "  # reflection: evaluation + metacognitive
+            "evaluasi hasil belajar"  # reflection: tambahan
         )
 
         result = classifier.classify(message)

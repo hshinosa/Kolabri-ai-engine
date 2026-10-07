@@ -1004,7 +1004,7 @@ class TestGoalRefineEndpoint:
 
 @pytest.mark.integration
 class TestGroupStatusEndpoint:
-    """GET /api/groups/{group_id}/status"""
+    """GET /api/groups/{group_id}/status (endpoint synchronous — pakai MagicMock, bukan AsyncMock)"""
 
     def test_success_no_interventions(self, client):
         result = {
@@ -1014,7 +1014,7 @@ class TestGroupStatusEndpoint:
         }
         with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
-            orch.check_group_status = AsyncMock(return_value=result)
+            orch.check_group_status = MagicMock(return_value=result)
             m.return_value = orch
 
             resp = client.get("/api/groups/g1/status")
@@ -1027,12 +1027,12 @@ class TestGroupStatusEndpoint:
         result = {"group_id": "g1", "should_intervene": False, "interventions": []}
         with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
-            orch.check_group_status = AsyncMock(return_value=result)
+            orch.check_group_status = MagicMock(return_value=result)
             m.return_value = orch
 
             client.get("/api/groups/g1/status?topic=Database")
 
-        orch.check_group_status.assert_awaited_once_with(
+        orch.check_group_status.assert_called_once_with(
             group_id="g1", topic="Database"
         )
 
@@ -1044,7 +1044,7 @@ class TestGroupStatusEndpoint:
         }
         with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
-            orch.check_group_status = AsyncMock(return_value=result)
+            orch.check_group_status = MagicMock(return_value=result)
             m.return_value = orch
 
             resp = client.get("/api/groups/g1/status")
@@ -1056,7 +1056,7 @@ class TestGroupStatusEndpoint:
     def test_orchestrator_error_returns_500(self, client):
         with patch("app.api.routes.groups.get_orchestrator") as m:
             orch = MagicMock()
-            orch.check_group_status = AsyncMock(side_effect=Exception("fail"))
+            orch.check_group_status = MagicMock(side_effect=Exception("fail"))
             m.return_value = orch
 
             resp = client.get("/api/groups/g1/status")

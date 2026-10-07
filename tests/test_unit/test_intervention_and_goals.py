@@ -35,6 +35,7 @@ from app.services.goal_validator import (
     SMARTValidationResult,
     get_goal_validator,
 )
+from app.core.config import settings
 from app.services.intervention import (
     ChatInterventionService,
     InterventionResult,
@@ -681,7 +682,11 @@ class TestInterventionInit:
     def test_constants(self, intervention_svc):
         assert intervention_svc.off_topic_threshold == 0.6
         assert intervention_svc.inactivity_threshold_minutes == 30
-        assert intervention_svc.minimum_messages_for_summary == 10
+        # Ikuti settings (default10; produksi bisa override via env) — jangan hardcode
+        assert (
+            intervention_svc.minimum_messages_for_summary
+            == settings.INTERVENTION_MINIMUM_MESSAGES_FOR_SUMMARY
+        )
 
     def test_injected_llm(self, mock_llm, intervention_svc):
         assert intervention_svc.llm_service is mock_llm
@@ -755,7 +760,7 @@ class TestCheckTriggers:
     async def test_needs_summary_not_enough_messages(self, intervention_svc):
         last_intervention = datetime(2024, 1, 1, 9, 0, 0, tzinfo=timezone.utc)
         messages = _make_messages(
-            5,
+            intervention_svc.minimum_messages_for_summary - 1,
             base_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
         )
 
@@ -778,9 +783,12 @@ class TestCheckTriggers:
     async def test_needs_summary_not_enough_since_intervention(self, intervention_svc):
         """Enough total messages but not enough since last intervention."""
         base = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        messages = _make_messages(12, base_time=base)
-        # Last intervention was after most messages
-        last_intervention = base + timedelta(minutes=8)
+        minimum = intervention_svc.minimum_messages_for_summary
+        messages = _make_messages(minimum + 2, base_time=base)
+        # Last intervention meninggalkan minimum-1 pesan sesudahnya (belum cukup)
+        last_intervention = base + timedelta(
+            minutes=len(messages) - (minimum - 1)
+        )
 
         triggers = await intervention_svc._check_triggers(
             messages, "topic", last_intervention
@@ -1024,12 +1032,14 @@ class TestGenerateSummary:
 
     @pytest.mark.asyncio
     async def test_insufficient_messages(self, intervention_svc):
-        messages = _make_messages(5)
+        messages = _make_messages(
+            intervention_svc.minimum_messages_for_summary - 1
+        )
         result = await intervention_svc.generate_summary(messages, "room1")
 
         assert result.success is True
         assert result.should_intervene is False
-        assert "10" in result.reason
+        assert str(intervention_svc.minimum_messages_for_summary) in result.reason
         assert "Belum cukup" in result.message
 
     @pytest.mark.asyncio

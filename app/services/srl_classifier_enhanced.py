@@ -129,7 +129,7 @@ class EnhancedSRLClassifier:
 
     REFLECTION_PATTERNS = {
         "evaluation_reflection": [
-            r"\b(kesimpulan|ringkasan|summary|intinya|-?kesimpul)\b",
+            r"\b(-?kesimpul\w*|ringkasan\w*|summary|intinya)\b",
             r"\b(setelah|dari)\s+(diskusi|pembahasan|latihan|praktik)\s+(tadi|ini|kita)",
             r"\b(sudah|telah)\s+(memahami|mengerti|paham|-?pemahaman)\b",
             r"\b(pelajaran|insight|hikmah)\s+(yang|dari)\b",
@@ -142,7 +142,7 @@ class EnhancedSRLClassifier:
             r"\b(pelajaran hari ini|yang sudah aku pelajari|hasil belajar)\b",
         ],
         "metacognitive_adaptation": [
-            r"\b(perlu|harus|sebaiknya)\s+(belajar|perbaiki|tingkatkan)\b",
+            r"\b(perlu|harus|sebaiknya)\s+(belajar|perbaiki|tingkatkan|latihan)\w*\b",
             r"\b(lain kali|ke depan|next time)\b",
             r"\b(masih perlu|kurang|belum cukup)\b",
             r"\b(strategi|cara|metode)\s+(yang lebih|baru|berbeda)\b",

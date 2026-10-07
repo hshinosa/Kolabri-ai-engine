@@ -8,6 +8,7 @@ Uses patterns from python-testing-patterns skill:
 - Async fixtures for FastAPI testing
 """
 
+import importlib.machinery
 import sys
 from unittest.mock import MagicMock
 
@@ -28,6 +29,11 @@ sys.modules["openpyxl"] = MagicMock()
 sys.modules["pandas"] = MagicMock()
 sys.modules["numpy"] = MagicMock()
 sys.modules["numpy"].bool_ = bool
+
+# PaddleOCR/PaddleX: inisialisasi ganda ("PDX has already been initialized")
+# saat import — unit test tidak menguji OCR nyata, cukup stub seperti di atas.
+sys.modules["paddleocr"] = MagicMock()
+sys.modules["paddlex"] = MagicMock()
 _pil_mock = MagicMock()
 
 
@@ -63,6 +69,8 @@ class _FakeImage:
 class _FakeResampling:
     LANCZOS = 1
     BICUBIC = 3
+    BILINEAR = 2
+    NEAREST = 0
 
 
 class _FakeImageModule:
@@ -70,6 +78,8 @@ class _FakeImageModule:
     Resampling = _FakeResampling
     LANCZOS = 1
     BICUBIC = 3
+    BILINEAR = 2
+    NEAREST = 0
     new = staticmethod(lambda mode, size, *a, **kw: _FakeImage(mode, size))
     frombytes = staticmethod(lambda mode, size, data, *a, **kw: _FakeImage(mode, size))
 

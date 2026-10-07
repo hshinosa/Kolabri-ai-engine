@@ -453,6 +453,9 @@ class TestMongoDBLoggerExportToCsv:
                         "is_hot": True,
                         "lexical_variety": 0.85,
                         "scaffolding_trigger": False,
+                        "srl_phase": "performance",
+                        "srl_sub_phase": "strategy_execution",
+                        "srl_confidence": 0.9,
                     },
                 }
             ]
@@ -480,6 +483,9 @@ class TestMongoDBLoggerExportToCsv:
                 "is_hot",
                 "lexical_variety",
                 "scaffolding_trigger",
+                "srl_phase",
+                "srl_sub_phase",
+                "srl_confidence",
             ]
             # Data row
             assert rows[1][0] == "case1"

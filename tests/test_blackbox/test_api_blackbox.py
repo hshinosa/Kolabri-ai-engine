@@ -276,7 +276,11 @@ class TestRequestValidation:
     def test_chat_rejects_empty_body(
         self, client: TestClient, auth_headers: dict[str, str]
     ):
-        response = client.post("/api/chat", headers=auth_headers)
+        # Endpoint /api/chat tidak ada (404); shape validation diuji ke
+        # /chat/personal/stream yang merupakan chat endpoint sungguhan.
+        response = client.post(
+            "/api/chat/personal/stream", headers=auth_headers
+        )
 
         _assert_json_error_structure(response, 422)
 

@@ -61,11 +61,14 @@ class TestSummaryBranchTimestamps:
         base = datetime(2024, 1, 1, 10, 0, 0)
         messages = _datetimes(base, 12)
 
-        # Only the 3 messages at minute 9..11 are newer than the cutoff
+        # Hanya minimum-1 pesan terakhir yang lebih baru dari cutoff
+        # (threshold-aware: threshold produksi bisa berubah via env)
+        minimum = service.minimum_messages_for_summary
         triggers = await service._check_triggers(
             messages=messages,
             topic="Topik diskusi",
-            last_intervention_time=base + timedelta(minutes=8),
+            last_intervention_time=base
+            + timedelta(minutes=len(messages) - (minimum - 1)),
         )
 
         assert triggers["needs_summary"] is False
