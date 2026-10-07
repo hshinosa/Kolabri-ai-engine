@@ -7,8 +7,14 @@ and measuring latency. Used exclusively for admin provider configuration validat
 This service uses the OpenAI-compatible API standard, which means it works with
 any provider that implements the OpenAI API format (OpenAI, Anthropic, Gemini,
 local models, etc.) by simply configuring the base_url and api_key.
+
+Security note (SSRF fix H2): error responses returned to the caller never echo
+the target's response body/HTML. Only a short, sanitized error class is sent;
+the full exception (including any body) is kept in the server logs.
 """
 
+import html
+import re
 import time
 from typing import Any
 
@@ -20,6 +26,63 @@ logger = get_logger(__name__)
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
+MAX_ERROR_LEN = 200
+_HTML_TAG_RE = re.compile(r"<[^>]{0,512}>")
+
+
+def sanitize_error_text(raw: str) -> str:
+    """Strip markup, collapse whitespace and cap the length.
+
+    Keeps reflected error messages safe to return to the caller even when the
+    underlying exception embedded a target response body.
+    """
+    text = _HTML_TAG_RE.sub(" ", raw)
+    text = html.unescape(text)
+    text = " ".join(text.split())
+    if not text:
+        return "Unknown error"
+    if len(text) > MAX_ERROR_LEN:
+        text = text[: MAX_ERROR_LEN - 3].rstrip() + "..."
+    return text
+
+
+def classify_error(exc: Exception, model: str) -> str:
+    """Map an exception to a short, safe error class.
+
+    Never returns the target's response body/HTML: HTTP status errors are
+    reported by status code only, everything else is reduced to the exception
+    class plus a sanitized, truncated message.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        if status in (401, 403):
+            raw = "Authentication failed - check the API key"
+        elif status == 404:
+            raw = f"Endpoint or model '{model}' not found (HTTP 404)"
+        elif status == 429:
+            raw = "Rate limited by provider (HTTP 429)"
+        elif status >= 500:
+            raw = f"Provider server error (HTTP {status})"
+        elif status >= 400:
+            raw = f"Provider rejected the request (HTTP {status})"
+        else:
+            raw = f"Provider returned HTTP {status}"
+        return sanitize_error_text(raw)
+
+    name = type(exc).__name__
+    text = str(exc)
+    lowered = text.lower()
+
+    if "timeout" in name.lower() or "timeout" in lowered:
+        raw = "Request timeout - provider API did not respond in time"
+    elif "connection" in name.lower() or "connection" in lowered:
+        raw = f"Connection error: {text}" if text else "Connection error"
+    elif text:
+        raw = f"{name}: {text}"
+    else:
+        raw = name
+
+    return sanitize_error_text(raw)
 
 
 async def test_provider(
@@ -32,7 +95,7 @@ async def test_provider(
     """
     Test AI provider connection using OpenAI-compatible API.
 
-    Works with any provider that implements OpenAI API format by configuring
+    Works with any provider that implements the OpenAI API format by configuring
     the base_url appropriately:
     - OpenAI: base_url = None (uses default)
     - Anthropic: base_url = provider's OpenAI-compatible endpoint
@@ -52,14 +115,14 @@ async def test_provider(
     if not model:
         model = DEFAULT_MODEL
 
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url=base_url,
-    )
-
     start_time = time.time()
 
     try:
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": test_prompt}],
@@ -76,16 +139,13 @@ async def test_provider(
         }
     except Exception as e:
         latency_ms = int((time.time() - start_time) * 1000)
-        error_msg = str(e)
-
-        if "401" in error_msg or "authentication" in error_msg.lower():
-            error_msg = "Invalid API key - authentication failed"
-        elif "404" in error_msg:
-            error_msg = f"Model '{model}' not found or not accessible with this API key"
-        elif "timeout" in error_msg.lower():
-            error_msg = "Request timeout - provider API did not respond in time"
-
-        logger.error(f"Provider test failed for {name}: {error_msg}", exc_info=True)
+        # Safe, short error class for the caller...
+        error_msg = classify_error(e, model)
+        # ...full detail (class, message, traceback) stays server-side only.
+        logger.error(
+            f"Provider test failed for {name}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
 
         return {
             "success": False,
