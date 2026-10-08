@@ -845,7 +845,14 @@ class RAGPipeline:
         output_check = self.guardrails.check_output(
             response=llm_response.content,
             original_query=query,
-            contexts=contexts,
+            # Grounding TIDAK dicek ulang di sini: Step 3.5 (_verify_grounding,
+            # berbasis embedding) sudah memverifikasi jawaban terhadap konteks.
+            # Heuristic keyword 20% di check_output adalah lapis duplikat yang
+            # memberi banyak false-positive utk jawaban panjang bahasa Indonesia
+            # (jawaban valid diblokir -> "Maaf, saya tidak menemukan informasi
+            # tersebut di materi kuliah"). Rules pedagogi lain (Socratic, solusi
+            # lengkap, PII) tetap berjalan.
+            contexts=None,
             context=guardrail_context,
         )
         log_guardrail_decision(
