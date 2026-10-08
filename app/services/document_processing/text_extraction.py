@@ -324,7 +324,11 @@ async def process_pptx(
     image_count = 0
 
     for slide_num, slide in enumerate(prs.slides, start=1):
-        slide_text_parts = []
+        # Dipisah sejak awal: teks asli slide vs teks hasil OCR gambar —
+        # supaya payload Qdrant bisa menjawab "teks & gambar di slide berapa"
+        # tanpa harus mem-parse ulang konten.
+        slide_text_parts: List[str] = []
+        image_ocr_parts: List[str] = []
 
         for shape in slide.shapes:
             if hasattr(shape, "text") and shape.text.strip():
@@ -344,7 +348,7 @@ async def process_pptx(
                     img = await asyncio.to_thread(_open_pptx_image, shape)
                     ocr_text = await ocr_fn(img)
                     if ocr_text:
-                        slide_text_parts.append(f"[IMAGE_OCR]: {ocr_text}")
+                        image_ocr_parts.append(ocr_text)
                         image_count += 1
                 except Exception as e:
                     logger.warning("pptx_image_ocr_failed", error=str(e))
@@ -354,7 +358,13 @@ async def process_pptx(
                         del img
                     gc.collect()
 
-        slide_text = "\n".join(slide_text_parts)
+        # Konten retrieval: teks asli + blok hasil OCR gambar (penanda [IMAGE_OCR])
+        content_parts = list(slide_text_parts)
+        if image_ocr_parts:
+            content_parts.extend(
+                f"[IMAGE_OCR]: {t}" for t in image_ocr_parts
+            )
+        slide_text = "\n".join(content_parts)
         if slide_text:
             total_chars += len(slide_text)
             slide_specs = await asyncio.to_thread(
@@ -365,7 +375,14 @@ async def process_pptx(
                 page_number=slide_num,
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
-                metadata={**(metadata or {}), "slide_number": slide_num},
+                metadata={
+                    **(metadata or {}),
+                    "slide_number": slide_num,
+                    # Pemisahan eksplisit per slide/halaman:
+                    "page_text": "\n".join(slide_text_parts),
+                    "image_ocr_text": "\n".join(image_ocr_parts),
+                    "has_image_ocr": bool(image_ocr_parts),
+                },
             )
             chunks.extend(_chunks_to_processed(slide_specs))
 
