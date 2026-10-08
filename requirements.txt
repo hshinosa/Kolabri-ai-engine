@@ -26,8 +26,11 @@ python-pptx>=1.0.0
 pillow>=10.0.0
 
 # OCR (Optical Character Recognition)
-# Heavy dependency (~500MB+ with models) for scanned PDF/image text extraction
-paddleocr>=2.7.0
+# Heavy dependency (~500MB+ with models) for scanned PDF/image text extraction.
+# paddleocr v3 (PaddleX) tidak lagi men-drag paddlepaddle — core harus
+# dinyatakan eksplisit, kalau tidak guard OCR_AVAILABLE akan menolaknya.
+paddleocr>=3.0.0,<4.0.0
+paddlepaddle>=3.0.0
 
 # LLM SDKs
 openai>=1.0.0

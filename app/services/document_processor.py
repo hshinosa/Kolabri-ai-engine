@@ -858,7 +858,13 @@ class DocumentProcessor:
         return "\n\n".join(combined_text)
 
     def _initialize_ocr_engine(self) -> None:
-        if self._ocr_engine is not None or not OCR_AVAILABLE:
+        # Saat OCR dinonaktifkan, turunkan flag-nya meski engine lama masih
+        # tersimpan — supaya jalur ingest tidak memakai OCR yang sudah dimatikan
+        # (sebelumnya return awal tanpa menyegarkan self.ocr_available).
+        if not OCR_AVAILABLE:
+            self.ocr_available = False
+            return
+        if self._ocr_engine is not None:
             return
         from app.services.document_processing import image_extraction
 

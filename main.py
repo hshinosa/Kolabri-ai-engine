@@ -5,6 +5,13 @@ FastAPI backend for AI computation, RAG pipeline, and LLM integration.
 Uses GLM-4.7 (OpenAI Compatible) as the primary LLM provider.
 """
 
+import os
+
+# Wajib sebelum import modul app: flags PaddleX dibaca sekali saat
+# `import paddleocr` pertama (default OneDNN menyebabkan bug PIR pada CPU ini).
+os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "true")
+
 import uvicorn
 import asyncio
 from fastapi import FastAPI, Request, Depends

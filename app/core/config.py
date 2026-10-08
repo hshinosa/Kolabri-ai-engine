@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     ENABLE_OCR: bool = True
+    # Bahasa model PaddleOCR — "id" (Indonesia) utk materi kuliah;
+    # tiap pemakaian pertama akan mengunduh model bahasa tsb bila belum ada.
+    OCR_LANGUAGE: str = "id"
 
     # [PHASE 4: MULTIMODAL RAG]
     ENABLE_MULTIMODAL_PROCESSING: bool = True

@@ -9,12 +9,21 @@ import asyncio
 import hashlib
 import importlib.util
 import logging
+import os
+import warnings
 from typing import Optional
 
 import numpy as np
 from PIL import Image
 
 from app.services.document_processing.models import ProcessedDocument
+
+# PaddleX CPU: matikan OneDNN secara default — build paddlepaddle 3.x di CPU
+# ini memakai jalur PIR+oneDNN yang melempar NotImplementedError
+# (ConvertPirAttribute2RuntimeAttribute...) setiap inferensi. Mode "paddle"
+# murni stabil; setenv di sini juga menjamin test yang meng-import modul ini
+# langsung ikut memakai mode yang benar (sebelum flags paddlex dibaca).
+os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 
 OCR_IMPORT_ERROR: Optional[str] = None
 try:
@@ -47,10 +56,20 @@ def initialize_ocr_engine() -> Optional[PaddleOCR]:
     if not OCR_AVAILABLE:
         return None
     try:
-        lang = getattr(settings, "OCR_LANGUAGE", None) or "en"
-        engine = PaddleOCR(use_angle_cls=True, lang=lang)
+        lang = getattr(settings, "OCR_LANGUAGE", None) or "id"
+        # PaddleOCR v3 (PaddleX):
+        # - use_textline_orientation: pengganti use_angle_cls (v2 deprecated)
+        # - orientation/unwarping dimatikan: materi kuliah berupa slide/dokumen
+        #   digital, bukan foto dokumen miring — UVDoc & doc-ori hanya
+        #   menambah latensi tanpa memperbaiki hasil.
+        engine = PaddleOCR(
+            use_textline_orientation=True,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            lang=lang,
+        )
         logging.getLogger("ppocr").setLevel(logging.ERROR)
-        logger.info("PaddleOCR initialized", lang=lang)
+        logger.info("PaddleOCR initialized", lang=lang, mode="paddle(no-mkldnn)")
         return engine
     except Exception:
         logger.exception("Failed to initialize PaddleOCR")
@@ -62,7 +81,12 @@ def run_paddle_ocr(image: Image.Image, ocr_engine: Optional[PaddleOCR]) -> str:
         return ""
     try:
         np_image = np.array(image)
-        result = ocr_engine.ocr(np_image, cls=True)
+        # PaddleOCR v3: .ocr() hanya wrapper deprecation menuju predict() dan
+        # TIDAK lagi menerima kw cls (v2) — panggil polos sambil menahan
+        # warning deprecation supaya log ingest tetap bersih.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Please use `predict` instead")
+            result = ocr_engine.ocr(np_image)
     except Exception:
         logger.exception("ocr_failed")
         return ""
@@ -76,8 +100,16 @@ def run_paddle_ocr(image: Image.Image, ocr_engine: Optional[PaddleOCR]) -> str:
         return ""
 
     lines = []
-    for line in result:
-        for _, (text, confidence) in line:
+    for item in result:
+        if isinstance(item, dict) or hasattr(item, "get"):
+            # PaddleOCR v3 (PaddleX OCRResult): teks & skor per blok baris.
+            texts = item.get("rec_texts") or []
+            scores = item.get("rec_scores") or []
+            pairs = zip(texts, scores)
+        else:
+            # PaddleOCR v2 (legacy): list of (bbox, (text, confidence)).
+            pairs = ((entry[1][0], entry[1][1]) for entry in item)
+        for text, confidence in pairs:
             if not text:
                 continue
             if confidence is not None and confidence < 0.4:
