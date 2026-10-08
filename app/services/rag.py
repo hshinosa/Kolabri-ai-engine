@@ -677,6 +677,29 @@ class RAGPipeline:
                 search_results, session_week_index
             )
 
+            if not search_results and effective_filter:
+                # WIDENING: hasil kosong BISA karena filter metadata caller (mis.
+                # filter minggu/topik) menutup dokumen yang sudah ada — pertanyaan
+                # lintas-topik dijawab "tidak memiliki informasi" padahal dokumen
+                # sudah diunggah. Coba sekali TANPA filter apa pun sebelum menyerah.
+                widened_results = await self.vector_store.search(
+                    query=safe_query,
+                    collection_name=collection_name,
+                    n_results=plan.top_k,
+                    where=None,
+                    score_threshold=plan.score_threshold,
+                )
+                widened_results = rank_week_boosted_results(
+                    widened_results, session_week_index
+                )
+                if widened_results:
+                    logger.info(
+                        "rag_widened_retrieval_ok",
+                        query=query[:100],
+                        hits=len(widened_results),
+                    )
+                    search_results = widened_results
+
             if not search_results:
                 logger.warning("rag_no_results", query=query[:100])
 

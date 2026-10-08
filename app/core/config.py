@@ -143,8 +143,11 @@ class Settings(BaseSettings):
     # without torch. Override via env if you need a different model from
     # TextCrossEncoder.list_supported_models().
     RERANK_MODEL_NAME: str = "jinaai/jina-reranker-v2-base-multilingual"
-    RERANK_TOP_K: int = 3
-    RERANK_RETRIEVE_K: int = 10
+    # Dilonggarkan (2026-10-08): konteks rerank diperluas agar LLM lebih
+    # sering melihat chunk terkait referensi dokumen — dokumen multi-slide
+    # (mis. aturan terpisah dari deskripsi) harus tercakup, bukan sebagian.
+    RERANK_TOP_K: int = 8
+    RERANK_RETRIEVE_K: int = 15
     # Persistent cache dir for downloaded reranker models. macOS evicts /var/folders
     # tmp dirs unpredictably, breaking fastembed's cache integrity check. Setting an
     # explicit project-local path avoids that. Empty string = let fastembed use its
