@@ -74,7 +74,9 @@ class VoyageEmbeddingService:
             self._client = None
             self._initialized = False
 
-    async def _embed_batch(self, batch: List[str], input_type: str) -> List[List[float]]:
+    async def _embed_batch(
+        self, batch: List[str], input_type: str
+    ) -> List[List[float]]:
         payload = {
             "input": batch,
             "model": self._model_name,
@@ -153,6 +155,12 @@ class VoyageEmbeddingService:
         embeddings = await self._embed([query], "query")
         return embeddings[0]
 
+    async def get_embedding(self, text: str) -> List[float]:
+        """Alias kompatibel — dipakai grounding verifier, logic listener,
+        dan query-dedup rag.py (sebelumnya hanya ada di LocalEmbeddingService,
+        sehingga jalur Voyage selalu AttributeError dan gagal diam-diam)."""
+        return await self.embed_text(text)
+
     @property
     def degraded(self) -> bool:
         """True when the service permanently fell back to the local provider."""
@@ -225,6 +233,8 @@ def get_embedding_service():
             _embedding_service = VoyageEmbeddingService()
             logger.info(
                 "embedding_provider_selected",
-                provider="local" if settings.EMBEDDING_PROVIDER != "voyage" else "voyage",
+                provider="local"
+                if settings.EMBEDDING_PROVIDER != "voyage"
+                else "voyage",
             )
     return _embedding_service
